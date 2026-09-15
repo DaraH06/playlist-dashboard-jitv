@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playlist Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header>
+    <h1>Raspi Playlist Dashboard</h1>
+    <a class="logout" href="{{ url_for('logout') }}">Logout</a>
+  </header>
+
+  <section class="status-bar">
+    <span id="status-dot" class="dot"></span>
+    <span id="status-text">Memuat status...</span>
+    <span id="chunk-text" class="chunk-text"></span>
+  </section>
+
+  <section class="settings-bar">
+    <label for="chunk-size-input">Refresh player otomatis tiap</label>
+    <input type="number" id="chunk-size-input" min="5" max="100" step="1" value="20">
+    <span>video</span>
+    <button id="btn-save-chunk-size">Simpan</button>
+    <span id="chunk-size-saved-note" class="chunk-size-saved-note"></span>
+  </section>
+
+  <section class="controls">
+    <button id="btn-prev">⏮ Sebelumnya</button>
+    <button id="btn-play">▶ Play</button>
+    <button id="btn-pause">⏸ Pause</button>
+    <button id="btn-stop">⏹ Stop</button>
+    <button id="btn-next">Berikutnya ⏭</button>
+  </section>
+
+  <main class="columns">
+    <div class="panel">
+      <h2>Pustaka Video</h2>
+      <nav id="breadcrumb" class="breadcrumb"></nav>
+      <ul id="browse-list" class="file-list"></ul>
+    </div>
+
+    <div class="panel">
+      <h2>Playlist Baru (belum diterapkan)</h2>
+      <div class="import-row">
+        <input type="file" id="import-file-input" accept=".txt">
+        <button id="btn-import-playlist">Impor dari File</button>
+      </div>
+      <p class="import-hint">File .txt, 1 nama video per baris. Video dicari otomatis di seluruh Pustaka Video.</p>
+      <span id="import-note" class="chunk-size-saved-note"></span>
+      <ul id="playlist-list" class="file-list"></ul>
+      <div class="playlist-actions">
+        <button id="btn-save">Simpan Playlist</button>
+        <button id="btn-apply">Simpan &amp; Terapkan ke Player</button>
+      </div>
+      <div class="named-save-row">
+        <input type="text" id="named-playlist-name-input" placeholder="Nama playlist (mis. Playlist Pagi)">
+        <button id="btn-save-named">Simpan sebagai Playlist Bernama</button>
+      </div>
+      <span id="named-save-note" class="chunk-size-saved-note"></span>
+    </div>
+  </main>
+
+  <section class="schedule-panel">
+    <h2>Jadwal Otomatis</h2>
+    <p class="schedule-hint" id="last-applied-text">Belum ada yang diterapkan otomatis.</p>
+
+    <div class="schedule-columns">
+      <div class="panel">
+        <h3>Playlist Tersimpan</h3>
+        <div class="import-row">
+          <input type="file" id="import-zip-input" accept=".zip,.playlist,.ply,.txt" multiple>
+          <button id="btn-import-zip">Impor Playlist Harian</button>
+        </div>
+        <p class="import-hint">Bisa file .zip (isi banyak .playlist), atau langsung beberapa file .playlist/.ply/.txt sekaligus tanpa perlu di-zip dulu — 1 file per tanggal, format broadcast. Live CCTV &amp; timecode presisi otomatis dilewati.</p>
+        <span id="import-zip-note" class="chunk-size-saved-note"></span>
+        <ul id="named-playlist-list" class="file-list"></ul>
+      </div>
+
+      <div class="panel">
+        <h3>Tambah Jadwal</h3>
+        <label class="schedule-label" for="schedule-playlist-select">Playlist</label>
+        <select id="schedule-playlist-select"></select>
+
+        <label class="schedule-label" for="schedule-time-input">Jam mulai</label>
+        <input type="time" id="schedule-time-input" value="08:00">
+
+        <label class="schedule-label" for="schedule-recurrence-select">Berulang</label>
+        <select id="schedule-recurrence-select">
+          <option value="daily">Setiap hari</option>
+          <option value="days">Hari tertentu</option>
+          <option value="date">Tanggal spesifik</option>
+        </select>
+
+        <div id="schedule-days-row" class="schedule-days-row">
+          <label><input type="checkbox" value="mon"> Sen</label>
+          <label><input type="checkbox" value="tue"> Sel</label>
+          <label><input type="checkbox" value="wed"> Rab</label>
+          <label><input type="checkbox" value="thu"> Kam</label>
+          <label><input type="checkbox" value="fri"> Jum</label>
+          <label><input type="checkbox" value="sat"> Sab</label>
+          <label><input type="checkbox" value="sun"> Min</label>
+        </div>
+
+        <div id="schedule-date-row" class="schedule-date-row" style="display:none;">
+          <label class="schedule-label" for="schedule-date-input">Tanggal</label>
+          <input type="date" id="schedule-date-input">
+        </div>
+
+        <button id="btn-add-schedule" class="schedule-add-btn">Tambah Jadwal</button>
+        <span id="schedule-add-note" class="chunk-size-saved-note"></span>
+      </div>
+    </div>
+
+    <div class="panel schedule-list-panel">
+      <h3>Daftar Jadwal</h3>
+      <ul id="schedule-list" class="file-list"></ul>
+    </div>
+  </section>
+
+  <section class="precision-panel">
+    <h2>Mode Jadwal Presisi</h2>
+    <p class="schedule-hint">
+      Mutar video PERSIS sesuai jam di file .playlist yang diimpor
+      (bukan cuma urut dari video 1) — kalau baru diaktifkan jam 11:00,
+      otomatis langsung lanjut ke video yang seharusnya main jam segitu.
+      Video yang hilang atau segmen live CCTV akan tampil layar hitam.
+      Mode ini terpisah dari playlist manual di atas.
+    </p>
+    <div class="precision-status-row">
+      <span id="precision-dot" class="dot"></span>
+      <span id="precision-status-text">Memuat status...</span>
+      <button id="btn-toggle-precision">Aktifkan Mode Presisi</button>
+    </div>
+    <div id="precision-detail" class="precision-detail"></div>
+  </section>
+
+  <section class="queue-panel">
+    <h2>Yang Sedang Berjalan di Player</h2>
+    <div class="queue-columns">
+      <div class="queue-col">
+        <h3>Sudah Diputar</h3>
+        <ul id="queue-played" class="file-list queue-list"></ul>
+      </div>
+      <div class="queue-col">
+        <h3>Sedang Diputar</h3>
+        <ul id="queue-playing" class="file-list queue-list"></ul>
+        <div id="now-playing-timer" class="now-playing-timer"></div>
+      </div>
+      <div class="queue-col">
+        <h3>Berikutnya</h3>
+        <ul id="queue-upcoming" class="file-list queue-list"></ul>
+      </div>
+    </div>
+  </section>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
