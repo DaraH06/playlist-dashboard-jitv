@@ -1,4 +1,3 @@
-let playlist = [];        // list of relative paths (draft, not yet applied)
 let currentBrowsePath = ""; // folder currently shown in the library panel
 
 // Client-side timer smoothing state: we only get fresh elapsed/duration
@@ -69,15 +68,7 @@ function renderBrowseList(data) {
     const span = document.createElement("span");
     span.className = "file-name";
     span.textContent = file.name;
-    const btn = document.createElement("button");
-    btn.textContent = "+ Tambah";
-    btn.onclick = () => {
-      if (!playlist.includes(file.path)) {
-        playlist.push(file.path);
-        renderPlaylist();
-      }
-    };
-    li.append(span, btn);
+    li.appendChild(span);
     ul.appendChild(li);
   });
 }
@@ -93,107 +84,7 @@ async function browseTo(path) {
   renderBrowseList(data);
 }
 
-// ---------- Impor playlist dari file .txt ----------
 
-document.getElementById("btn-import-playlist").onclick = async () => {
-  const input = document.getElementById("import-file-input");
-  const note = document.getElementById("import-note");
-
-  if (!input.files || input.files.length === 0) {
-    note.textContent = "Pilih file .txt dulu";
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append("file", input.files[0]);
-
-  note.textContent = "Memproses...";
-  note.className = "chunk-size-saved-note";
-
-  const res = await fetch("/api/import-playlist", { method: "POST", body: formData });
-  const data = await res.json();
-
-  if (data.error) {
-    note.textContent = data.error;
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-
-  playlist = data.matched;
-  renderPlaylist();
-  input.value = "";
-
-  if (data.not_found.length > 0) {
-    const preview = data.not_found.slice(0, 5).join(", ");
-    const more = data.not_found.length > 5 ? `, dan ${data.not_found.length - 5} lainnya` : "";
-    note.textContent = `${data.matched.length} video diimpor. ${data.not_found.length} TIDAK ketemu: ${preview}${more}`;
-    note.className = "chunk-size-saved-note error";
-  } else {
-    note.textContent = `${data.matched.length} video berhasil diimpor ✓`;
-    note.className = "chunk-size-saved-note ok";
-  }
-};
-
-// ---------- Draft playlist editor ----------
-
-function renderPlaylist() {
-  const ul = document.getElementById("playlist-list");
-  ul.innerHTML = "";
-  if (playlist.length === 0) {
-    ul.innerHTML = "<li>Playlist kosong — tambahkan dari Pustaka Video</li>";
-    return;
-  }
-  playlist.forEach((relPath, i) => {
-    const li = document.createElement("li");
-    const span = document.createElement("span");
-    span.className = "file-name";
-    span.textContent = `${i + 1}. ${displayName(relPath)}`;
-
-    const actions = document.createElement("div");
-
-    const up = document.createElement("button");
-    up.textContent = "↑";
-    up.onclick = () => {
-      if (i > 0) {
-        [playlist[i - 1], playlist[i]] = [playlist[i], playlist[i - 1]];
-        renderPlaylist();
-      }
-    };
-
-    const down = document.createElement("button");
-    down.textContent = "↓";
-    down.onclick = () => {
-      if (i < playlist.length - 1) {
-        [playlist[i + 1], playlist[i]] = [playlist[i], playlist[i + 1]];
-        renderPlaylist();
-      }
-    };
-
-    const remove = document.createElement("button");
-    remove.textContent = "✕";
-    remove.onclick = () => {
-      playlist.splice(i, 1);
-      renderPlaylist();
-    };
-
-    actions.append(up, down, remove);
-    li.append(span, actions);
-    ul.appendChild(li);
-  });
-}
-
-async function loadPlaylist() {
-  playlist = await api("/api/playlist");
-  renderPlaylist();
-}
-
-async function savePlaylist() {
-  await api("/api/playlist", {
-    method: "POST",
-    body: JSON.stringify({ items: playlist }),
-  });
-}
 
 // ---------- Live player status: played / playing / upcoming ----------
 
@@ -386,59 +277,12 @@ async function loadNamedPlaylists() {
       btn.onclick = async () => {
         await api(`/api/named-playlists/${encodeURIComponent(name)}`, { method: "DELETE" });
         loadNamedPlaylists();
-        loadSchedule();
       };
       li.append(span, btn);
       ul.appendChild(li);
     });
   }
-
-  const select = document.getElementById("schedule-playlist-select");
-  const prevValue = select.value;
-  select.innerHTML = "";
-  if (names.length === 0) {
-    select.innerHTML = "<option value=''>Belum ada playlist bernama</option>";
-  } else {
-    names.forEach((name) => {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      select.appendChild(opt);
-    });
-    if (names.includes(prevValue)) select.value = prevValue;
-  }
 }
-
-document.getElementById("btn-save-named").onclick = async () => {
-  const nameInput = document.getElementById("named-playlist-name-input");
-  const note = document.getElementById("named-save-note");
-  const name = nameInput.value.trim();
-
-  if (!name) {
-    note.textContent = "Isi nama playlist dulu";
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-  if (playlist.length === 0) {
-    note.textContent = "Playlist Baru masih kosong";
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-
-  const res = await api("/api/named-playlists", {
-    method: "POST",
-    body: JSON.stringify({ name, items: playlist }),
-  });
-  if (res.error) {
-    note.textContent = res.error;
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-  note.textContent = `Tersimpan sebagai "${res.name}" ✓`;
-  note.className = "chunk-size-saved-note ok";
-  nameInput.value = "";
-  loadNamedPlaylists();
-};
 
 document.getElementById("btn-import-zip").onclick = async () => {
   const input = document.getElementById("import-zip-input");
@@ -484,93 +328,7 @@ document.getElementById("btn-import-zip").onclick = async () => {
   loadNamedPlaylists();
 };
 
-// ---------- Schedule ----------
 
-const WEEKDAY_LABELS = { mon: "Sen", tue: "Sel", wed: "Rab", thu: "Kam", fri: "Jum", sat: "Sab", sun: "Min" };
-
-function describeRecurrence(entry) {
-  if (entry.recurrence === "daily") return "Setiap hari";
-  if (entry.recurrence === "days") {
-    return (entry.days || []).map((d) => WEEKDAY_LABELS[d] || d).join(", ");
-  }
-  if (entry.recurrence === "date") return entry.date;
-  return entry.recurrence;
-}
-
-async function loadSchedule() {
-  const data = await api("/api/schedule");
-  const ul = document.getElementById("schedule-list");
-  ul.innerHTML = "";
-
-  if (!data.schedule || data.schedule.length === 0) {
-    ul.innerHTML = "<li>Belum ada jadwal ditambahkan</li>";
-  } else {
-    data.schedule.forEach((entry) => {
-      const li = document.createElement("li");
-      const span = document.createElement("span");
-      span.className = "file-name";
-      span.textContent = `${entry.time} — ${describeRecurrence(entry)} — ${entry.playlist_name}`;
-      const btn = document.createElement("button");
-      btn.textContent = "Hapus";
-      btn.onclick = async () => {
-        await api(`/api/schedule/${entry.id}`, { method: "DELETE" });
-        loadSchedule();
-      };
-      li.append(span, btn);
-      ul.appendChild(li);
-    });
-  }
-
-  const lastText = document.getElementById("last-applied-text");
-  if (data.last_applied) {
-    lastText.textContent = `Terakhir diterapkan otomatis: "${data.last_applied.playlist_name}" pada ${data.last_applied.at}`;
-  } else {
-    lastText.textContent = "Belum ada yang diterapkan otomatis.";
-  }
-}
-
-document.getElementById("schedule-recurrence-select").onchange = (e) => {
-  document.getElementById("schedule-days-row").style.display = e.target.value === "days" ? "flex" : "none";
-  document.getElementById("schedule-date-row").style.display = e.target.value === "date" ? "block" : "none";
-};
-
-document.getElementById("btn-add-schedule").onclick = async () => {
-  const note = document.getElementById("schedule-add-note");
-  const time = document.getElementById("schedule-time-input").value;
-  const recurrence = document.getElementById("schedule-recurrence-select").value;
-  const playlistName = document.getElementById("schedule-playlist-select").value;
-
-  if (!playlistName) {
-    note.textContent = "Pilih playlist dulu (simpan sebagai playlist bernama di atas)";
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-  if (!time) {
-    note.textContent = "Isi jam mulai";
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-
-  const body = { time, playlist_name: playlistName, recurrence };
-  if (recurrence === "days") {
-    body.days = Array.from(document.querySelectorAll("#schedule-days-row input:checked")).map((el) => el.value);
-  } else if (recurrence === "date") {
-    body.date = document.getElementById("schedule-date-input").value;
-  }
-
-  const res = await api("/api/schedule", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  if (res.error) {
-    note.textContent = res.error;
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-  note.textContent = "Jadwal ditambahkan ✓";
-  note.className = "chunk-size-saved-note ok";
-  loadSchedule();
-};
 
 // ---------- Wire up controls ----------
 
@@ -580,16 +338,7 @@ document.getElementById("btn-stop").onclick = () => api("/api/stop", { method: "
 document.getElementById("btn-next").onclick = () => api("/api/next", { method: "POST" }).then(pollStatus);
 document.getElementById("btn-prev").onclick = () => api("/api/prev", { method: "POST" }).then(pollStatus);
 
-document.getElementById("btn-save").onclick = async () => {
-  await savePlaylist();
-  alert("Playlist disimpan.");
-};
 
-document.getElementById("btn-apply").onclick = async () => {
-  await savePlaylist();
-  await api("/api/apply", { method: "POST" });
-  pollStatus();
-};
 
 // ---------- Mode Jadwal Presisi ----------
 
@@ -648,12 +397,9 @@ document.getElementById("btn-toggle-precision").onclick = async () => {
 };
 
 browseTo("");
-loadPlaylist();
 loadChunkSizeSetting();
 loadNamedPlaylists();
-loadSchedule();
 loadPrecisionStatus();
 pollStatus();
 setInterval(pollStatus, 3000);
-setInterval(loadSchedule, 15000);
 setInterval(loadPrecisionStatus, 3000);

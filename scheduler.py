@@ -16,12 +16,14 @@ import os
 import threading
 import time
 import uuid
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone, timedelta
 
-# Sama seperti precision_scheduler.py: jam dipatok ke WIB secara
-# eksplisit, tidak ikut timezone sistem Pi.
-WIB = ZoneInfo("Asia/Jakarta")
+# Jam dipatok ke WIB secara eksplisit (UTC+7).
+try:
+    from zoneinfo import ZoneInfo
+    WIB = ZoneInfo("Asia/Jakarta")
+except Exception:
+    WIB = timezone(timedelta(hours=7))
 
 PLAYLISTS_FILE = os.path.join(os.path.dirname(__file__), "playlists.json")
 SCHEDULE_FILE = os.path.join(os.path.dirname(__file__), "schedule.json")
