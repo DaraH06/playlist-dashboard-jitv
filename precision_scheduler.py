@@ -319,7 +319,7 @@ class PrecisionScheduler:
 
                 self._current_entry_key = key
 
-                if self._switch_count >= PRECISION_RESTART_EVERY:
+                if self._switch_count >= self._restart_every():
                     self.controller.restart_process_only()
                     self._switch_count = 0
                     self._current_entry_key = None  # force reload next tick
