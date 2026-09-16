@@ -202,8 +202,16 @@ class PrecisionScheduler:
                 "current": current,
                 "upcoming": upcoming,
                 "switch_count": self._switch_count,
-                "restart_every": PRECISION_RESTART_EVERY,
+                "restart_every": self._restart_every(),
             }
+
+    def _restart_every(self):
+        value = getattr(self.controller, "chunk_size", PRECISION_RESTART_EVERY)
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = PRECISION_RESTART_EVERY
+        return max(1, value)
 
     def timeline(self, played_limit=5, upcoming_limit=15):
         """Daftar 'sudah diputar / sedang diputar / berikutnya' untuk
