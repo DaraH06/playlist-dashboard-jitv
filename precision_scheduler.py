@@ -30,14 +30,14 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone, timedelta
 
-# Jam dipatok eksplisit ke WIB, TIDAK ikut timezone sistem Pi — kalau
-# jam sistem Pi kebetulan di-set UTC (default umum di Raspberry Pi OS
-# yang belum dikonfigurasi), engine ini tetap jalan sesuai WIB, bukan
-# ikut geser sesuai offset sistem.
-WIB = ZoneInfo("Asia/Jakarta")
+# Jam dipatok eksplisit ke WIB (UTC+7), TIDAK ikut timezone sistem.
+try:
+    from zoneinfo import ZoneInfo
+    WIB = ZoneInfo("Asia/Jakarta")
+except Exception:
+    WIB = timezone(timedelta(hours=7))
 
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
 TICK_SECONDS = 2

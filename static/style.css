@@ -125,31 +125,7 @@ header h1 { font-size: 18px; margin: 0; }
 .chunk-size-saved-note.ok { color: var(--accent); }
 .chunk-size-saved-note.error { color: var(--danger); }
 
-.named-save-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-.named-save-row input[type="text"] {
-  flex: 1;
-  padding: 8px;
-  background: #0f1114;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-}
-.named-save-row button {
-  padding: 8px 14px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 13px;
-  white-space: nowrap;
-}
-.named-save-row button:hover { border-color: var(--accent); }
+
 
 .import-row {
   display: flex;
@@ -178,79 +154,11 @@ header h1 { font-size: 18px; margin: 0; }
   margin: 0 0 8px;
 }
 
-.schedule-panel {
-  padding: 0 24px 32px;
-}
-.schedule-panel h2 {
-  font-size: 14px;
-  color: var(--text-dim);
-  margin: 0 0 6px;
-}
 .schedule-hint {
   font-size: 13px;
   color: var(--text-dim);
   margin: 0 0 14px;
 }
-.schedule-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-@media (max-width: 720px) {
-  .schedule-columns { grid-template-columns: 1fr; }
-}
-.schedule-panel h3 {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin: 0 0 12px;
-}
-.schedule-label {
-  display: block;
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 10px;
-  margin-bottom: 4px;
-}
-.schedule-panel select,
-.schedule-panel input[type="time"],
-.schedule-panel input[type="date"] {
-  width: 100%;
-  padding: 8px;
-  background: #0f1114;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-}
-.schedule-days-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.schedule-days-row label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.schedule-date-row { margin-top: 10px; }
-.schedule-add-btn {
-  width: 100%;
-  margin-top: 16px;
-  padding: 10px;
-  background: var(--accent);
-  border: none;
-  border-radius: 6px;
-  color: #0c0c0c;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 13px;
-}
-.schedule-add-btn:hover { background: var(--accent-hover); }
-.schedule-list-panel { margin-top: 0; }
 
 .precision-panel {
   padding: 0 24px 32px;
@@ -368,23 +276,7 @@ header h1 { font-size: 18px; margin: 0; }
 .folder-name { color: var(--text); font-weight: 500; }
 .now-playing { color: var(--accent); font-weight: 600; }
 
-.playlist-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 14px;
-}
-.playlist-actions button {
-  flex: 1;
-  padding: 10px;
-  background: var(--accent);
-  border: none;
-  border-radius: 6px;
-  color: #0c0c0c;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 13px;
-}
-.playlist-actions button:hover { background: var(--accent-hover); }
+
 
 /* Queue panel: played / playing / upcoming */
 .queue-panel {
