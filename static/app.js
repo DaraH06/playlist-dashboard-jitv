@@ -379,9 +379,7 @@ document.getElementById("btn-close-rundown").onclick = closeRundown;
 document.getElementById("rundown-modal").addEventListener("click", (e) => {
   if (e.target === document.getElementById("rundown-modal")) closeRundown();
 });
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeRundown();
-});
+
 
 
 document.getElementById("btn-import-zip").onclick = async () => {
@@ -500,6 +498,139 @@ browseTo("");
 loadChunkSizeSetting();
 loadNamedPlaylists();
 loadPrecisionStatus();
+loadFallbackVideos();
 pollStatus();
 setInterval(pollStatus, 3000);
 setInterval(loadPrecisionStatus, 3000);
+
+
+// ---------- Fallback Video Manager ----------
+
+let _fallbackList = [];  // current saved list (rel paths)
+let _pickerPath = "";    // current browse path inside the picker modal
+
+async function loadFallbackVideos() {
+  _fallbackList = await api("/api/fallback-videos");
+  renderFallbackList();
+}
+
+function renderFallbackList() {
+  const ul = document.getElementById("fallback-list");
+  ul.innerHTML = "";
+  if (_fallbackList.length === 0) {
+    ul.innerHTML = "<li class=\"queue-empty\">Belum ada video pengganti. Klik \"+ Tambah\" untuk memilih dari pustaka.</li>";
+    return;
+  }
+  _fallbackList.forEach((rel, idx) => {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.className = "file-name";
+    span.textContent = `📺 ${displayName(rel)}`;
+    span.title = rel;
+
+    const btn = document.createElement("button");
+    btn.textContent = "Hapus";
+    btn.className = "btn-danger";
+    btn.onclick = async () => {
+      _fallbackList.splice(idx, 1);
+      await api("/api/fallback-videos", {
+        method: "POST",
+        body: JSON.stringify({ items: _fallbackList }),
+      });
+      renderFallbackList();
+    };
+
+    li.append(span, btn);
+    ul.appendChild(li);
+  });
+}
+
+// --- Picker modal ---
+
+async function openFallbackPicker() {
+  document.getElementById("fallback-picker-modal").classList.add("open");
+  await pickerBrowseTo("");
+}
+
+function closeFallbackPicker() {
+  document.getElementById("fallback-picker-modal").classList.remove("open");
+}
+
+async function pickerBrowseTo(path) {
+  _pickerPath = path;
+  const data = await api("/api/browse?path=" + encodeURIComponent(path));
+  if (data.error) { alert("Error: " + data.error); return; }
+
+  // Breadcrumb
+  const nav = document.getElementById("fallback-picker-breadcrumb");
+  nav.innerHTML = "";
+  const rootA = document.createElement("a");
+  rootA.textContent = "Semua Video";
+  rootA.href = "#";
+  rootA.onclick = (e) => { e.preventDefault(); pickerBrowseTo(""); };
+  nav.appendChild(rootA);
+  data.crumbs.forEach(c => {
+    nav.appendChild(document.createTextNode(" / "));
+    const a = document.createElement("a");
+    a.textContent = c.name;
+    a.href = "#";
+    a.onclick = (e) => { e.preventDefault(); pickerBrowseTo(c.path); };
+    nav.appendChild(a);
+  });
+
+  // List
+  const ul = document.getElementById("fallback-picker-list");
+  ul.innerHTML = "";
+  if (data.folders.length === 0 && data.files.length === 0) {
+    ul.innerHTML = "<li>Folder kosong</li>";
+    return;
+  }
+  data.folders.forEach(folder => {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.className = "file-name folder-name";
+    span.textContent = "📁 " + folder.name;
+    const btn = document.createElement("button");
+    btn.textContent = "Buka";
+    btn.onclick = () => pickerBrowseTo(folder.path);
+    li.append(span, btn);
+    ul.appendChild(li);
+  });
+  data.files.forEach(file => {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.className = "file-name";
+    span.textContent = file.name;
+
+    const btn = document.createElement("button");
+    const alreadyAdded = _fallbackList.includes(file.path);
+    btn.textContent = alreadyAdded ? "✓ Sudah ditambahkan" : "Pilih";
+    btn.disabled = alreadyAdded;
+    btn.onclick = async () => {
+      if (_fallbackList.includes(file.path)) return;
+      _fallbackList.push(file.path);
+      const res = await api("/api/fallback-videos", {
+        method: "POST",
+        body: JSON.stringify({ items: _fallbackList }),
+      });
+      _fallbackList = res.items;
+      renderFallbackList();
+      closeFallbackPicker();
+    };
+
+    li.append(span, btn);
+    ul.appendChild(li);
+  });
+}
+
+document.getElementById("btn-add-fallback").onclick = openFallbackPicker;
+document.getElementById("btn-close-fallback-picker").onclick = closeFallbackPicker;
+document.getElementById("fallback-picker-modal").addEventListener("click", (e) => {
+  if (e.target === document.getElementById("fallback-picker-modal")) closeFallbackPicker();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeFallbackPicker();
+    closeRundown();
+  }
+});
