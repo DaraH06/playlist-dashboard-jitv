@@ -166,6 +166,12 @@ class PrecisionScheduler:
         with self._lock:
             return {name: len(entries) for name, entries in self.playlists.items()}
 
+    def get_playlist(self, date_name):
+        """Kembalikan list entri rundown untuk satu tanggal, atau None."""
+        with self._lock:
+            entries = self.playlists.get(date_name)
+            return list(entries) if entries is not None else None
+
     def delete_playlist(self, date_name):
         with self._lock:
             self.playlists.pop(date_name, None)
