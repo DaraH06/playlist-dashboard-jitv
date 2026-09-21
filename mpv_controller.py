@@ -355,14 +355,16 @@ class MPVController:
 
     # ---------- direct file control (used by precision mode) ----------
 
-    def load_file_and_seek(self, full_path, seek_seconds=0):
+    def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
         """Load a single file directly (not via mpv's playlist feature)
         and jump to the given position. Used by the precision scheduler
         to start a video exactly where it should be right now, instead
-        of always starting from 0:00."""
+        of always starting from 0:00. Set loop=True for fallback videos
+        that should repeat until the next scheduled slot starts."""
         self._send(["loadfile", full_path, "replace"])
         if seek_seconds and seek_seconds > 0:
             self._send(["seek", seek_seconds, "absolute"])
+        self._send(["set_property", "loop-file", "inf" if loop else "no"])
         self._send(["set_property", "pause", False])
 
     def show_blank(self):
@@ -542,7 +544,7 @@ class MockMPVController:
         return self.chunk_size
 
     # --- direct file control (precision mode) ---
-    def load_file_and_seek(self, full_path, seek_seconds=0):
+    def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
         with self._lock:
             self._playlist  = [full_path]
             self._index     = 0

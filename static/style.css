@@ -465,3 +465,48 @@ header h1 { font-size: 18px; margin: 0; }
 .badge-missing { background: rgba(224, 90, 90, 0.18); color: #e05a5a; }
 .badge-live    { background: rgba(33, 150, 243, 0.18); color: #64b5f6; }
 
+/* ---------- Fallback video panel ---------- */
+.fallback-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px 24px;
+  margin: 0 24px 24px;
+}
+.fallback-panel h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.fallback-actions {
+  margin: 12px 0 8px;
+}
+.fallback-actions button {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.fallback-actions button:hover { background: #1d4ed8; }
+
+/* Danger (remove) button */
+button.btn-danger {
+  background: rgba(224, 90, 90, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(224, 90, 90, 0.35);
+}
+button.btn-danger:hover {
+  background: rgba(224, 90, 90, 0.25);
+}
+
+/* Picker modal body — scrollable */
+.picker-body {
+  max-height: 55vh;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
