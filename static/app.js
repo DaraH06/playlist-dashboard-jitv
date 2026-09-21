@@ -272,17 +272,117 @@ async function loadNamedPlaylists() {
       const span = document.createElement("span");
       span.className = "file-name";
       span.textContent = `${name} (${playlists[name].length} video)`;
-      const btn = document.createElement("button");
-      btn.textContent = "Hapus";
-      btn.onclick = async () => {
+
+      const btnGroup = document.createElement("div");
+      btnGroup.className = "btn-group";
+
+      const btnRundown = document.createElement("button");
+      btnRundown.textContent = "👁 Rundown";
+      btnRundown.title = "Lihat rundown siaran tanggal ini";
+      btnRundown.onclick = () => openRundown(name);
+
+      const btnHapus = document.createElement("button");
+      btnHapus.textContent = "Hapus";
+      btnHapus.onclick = async () => {
         await api(`/api/named-playlists/${encodeURIComponent(name)}`, { method: "DELETE" });
         loadNamedPlaylists();
       };
-      li.append(span, btn);
+
+      btnGroup.append(btnRundown, btnHapus);
+      li.append(span, btnGroup);
       ul.appendChild(li);
     });
   }
 }
+
+// ---------- Rundown Modal ----------
+
+function _secondsToClockWIB(totalSeconds) {
+  // Jam tayang di file playlist bisa >= 24 (jadwal melewati tengah malam).
+  // Tampilkan apa adanya (tanpa bungkus ke 0) supaya operator tahu jam persisnya.
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+async function openRundown(dateName) {
+  const modal   = document.getElementById("rundown-modal");
+  const title   = document.getElementById("rundown-title");
+  const summary = document.getElementById("rundown-summary");
+  const tbody   = document.getElementById("rundown-tbody");
+
+  title.textContent = `Rundown Siaran: ${dateName}`;
+  summary.textContent = "Memuat…";
+  tbody.innerHTML = "";
+  modal.classList.add("open");
+
+  const res = await fetch(`/api/precision/playlists/${encodeURIComponent(dateName)}`);
+  if (!res.ok) {
+    summary.textContent = "Gagal memuat data rundown.";
+    return;
+  }
+  const entries = await res.json();
+
+  // Hitung statistik ringkasan
+  let countVideo = 0, countMissing = 0, countLive = 0, totalDurSec = 0;
+  entries.forEach(e => {
+    totalDurSec += e.duration || 0;
+    if (e.type === "video")        countVideo++;
+    else if (e.type === "missing") countMissing++;
+    else if (e.type === "live")    countLive++;
+  });
+
+  const totalDurStr = formatSeconds(totalDurSec);
+  summary.innerHTML =
+    `<span>📊 ${entries.length} program</span>` +
+    `<span>⏱ Total siaran: ${totalDurStr}</span>` +
+    `<span style="color:#4caf50">🟢 ${countVideo} siap</span>` +
+    (countMissing ? `<span style="color:#e05a5a">🔴 ${countMissing} missing</span>` : "") +
+    (countLive    ? `<span style="color:#64b5f6">📡 ${countLive} live</span>` : "");
+
+  // Render baris tabel
+  entries.forEach(e => {
+    const tr = document.createElement("tr");
+    if (e.type === "missing") tr.className = "row-missing";
+    else if (e.type === "live") tr.className = "row-live";
+
+    let badgeHtml;
+    if (e.type === "video")
+      badgeHtml = `<span class="badge badge-video">🟢 Siap</span>`;
+    else if (e.type === "missing")
+      badgeHtml = `<span class="badge badge-missing">🔴 Missing</span>`;
+    else
+      badgeHtml = `<span class="badge badge-live">📡 Live</span>`;
+
+    // Label: untuk segmen live, potong URL SRT agar tidak terlalu panjang
+    const rawLabel = e.label || "-";
+    const displayLabel = e.type === "live"
+      ? `Relay CCTV (${rawLabel.length > 40 ? rawLabel.slice(0, 40) + "…" : rawLabel})`
+      : rawLabel;
+
+    tr.innerHTML =
+      `<td class="col-time">${_secondsToClockWIB(e.start)}</td>` +
+      `<td class="col-label">${displayLabel}</td>` +
+      `<td class="col-dur">${formatSeconds(e.duration)}</td>` +
+      `<td class="col-status">${badgeHtml}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function closeRundown() {
+  document.getElementById("rundown-modal").classList.remove("open");
+}
+
+// Tutup modal: tombol ✕, klik di luar kotak, tombol Escape
+document.getElementById("btn-close-rundown").onclick = closeRundown;
+document.getElementById("rundown-modal").addEventListener("click", (e) => {
+  if (e.target === document.getElementById("rundown-modal")) closeRundown();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeRundown();
+});
+
 
 document.getElementById("btn-import-zip").onclick = async () => {
   const input = document.getElementById("import-zip-input");

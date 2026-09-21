@@ -387,3 +387,186 @@ class MPVController:
         self._watcher_started = True
         t = threading.Thread(target=self._watch_loop, daemon=True)
         t.start()
+
+
+# ---------------------------------------------------------------------------
+# Mock controller — dipakai otomatis di Windows (atau jika env var
+# DASHBOARD_MOCK=1 di-set).  Public API identik dengan MPVController
+# sehingga app.py tidak perlu berubah sama sekali saat di-deploy ke Pi.
+# ---------------------------------------------------------------------------
+
+class MockMPVController:
+    """Simulasi in-memory MPVController untuk development lokal di Windows.
+
+    Mensimulasikan:
+    - is_running() selalu True setelah start()
+    - load_playlist() / load_file_and_seek() menyimpan state di memori
+    - status() mengembalikan JSON yang identik dengan controller asli
+    - Timer posisi video terus berjalan (thread background)
+    """
+
+    def __init__(self, socket_path=None):
+        self.chunk_size = load_chunk_size()
+        self.precision_mode_active = False
+        self._lock = threading.Lock()
+        self._running = False
+        self._paused  = True
+        self._playlist = []      # list of full path strings
+        self._index    = None    # current playlist index
+        self._time_pos = 0.0     # detik saat ini di video
+        self._duration = 0.0     # durasi video saat ini (0 jika tidak diketahui)
+        self._chunk_progress = 0
+        threading.Thread(target=self._tick, daemon=True).start()
+
+    # --- timer background ---
+    def _tick(self):
+        while True:
+            time.sleep(1)
+            with self._lock:
+                if self._running and not self._paused and self._duration > 0:
+                    self._time_pos += 1
+                    if self._time_pos >= self._duration:
+                        # Pindah ke video berikutnya dalam playlist
+                        if self._index is not None and self._index + 1 < len(self._playlist):
+                            self._index   += 1
+                            self._time_pos = 0.0
+                            self._duration = 120.0  # durasi tiruan 2 menit per video
+                            self._chunk_progress += 1
+                        else:
+                            # playlist habis — loop dari awal
+                            if self._playlist:
+                                self._index    = 0
+                                self._time_pos = 0.0
+
+    # --- process management (no-op on Windows) ---
+    def is_running(self):
+        return self._running
+
+    def start(self):
+        with self._lock:
+            self._running = True
+
+    def _kill_existing(self):
+        pass  # tidak ada proses nyata untuk di-kill
+
+    # --- playlist control ---
+    def load_playlist(self, filepaths):
+        if not filepaths:
+            return {"error": "empty playlist"}
+        with self._lock:
+            self._playlist      = list(filepaths)
+            self._index         = 0
+            self._time_pos      = 0.0
+            self._duration      = 120.0  # tiruan 2 menit per video
+            self._paused        = False
+            self._chunk_progress = 0
+        return {"error": None}
+
+    def play(self):
+        with self._lock:
+            self._paused = False
+        return {"error": None}
+
+    def pause(self):
+        with self._lock:
+            self._paused = True
+        return {"error": None}
+
+    def stop(self):
+        with self._lock:
+            self._index    = None
+            self._time_pos = 0.0
+            self._duration = 0.0
+            self._paused   = True
+        return {"error": None}
+
+    def next(self):
+        with self._lock:
+            if self._index is not None and self._index + 1 < len(self._playlist):
+                self._index   += 1
+                self._time_pos = 0.0
+                self._duration = 120.0
+                self._chunk_progress += 1
+        return {"error": None}
+
+    def prev(self):
+        with self._lock:
+            if self._index is not None and self._index > 0:
+                self._index   -= 1
+                self._time_pos = 0.0
+                self._duration = 120.0
+        return {"error": None}
+
+    def get_playlist(self):
+        with self._lock:
+            return [{"filename": p, "current": (i == self._index)}
+                    for i, p in enumerate(self._playlist)]
+
+    def status(self):
+        with self._lock:
+            if not self._running or self._index is None:
+                return {"running": self._running, "playlist": []}
+
+            items = []
+            for i, p in enumerate(self._playlist):
+                state = "played" if i < self._index else ("playing" if i == self._index else "upcoming")
+                item = {"name": os.path.basename(p), "path": p, "state": state}
+                if state == "playing" and self._duration:
+                    item["duration_str"] = format_duration(self._duration)
+                items.append(item)
+
+            return {
+                "running":               True,
+                "paused":                self._paused,
+                "current_file":          self._playlist[self._index] if self._index is not None else None,
+                "playlist_index":        self._index,
+                "playlist_count":        len(self._playlist),
+                "chunk_progress":        self._chunk_progress,
+                "chunk_size":            self.chunk_size,
+                "current_time_pos":      self._time_pos,
+                "current_time_str":      format_duration(self._time_pos),
+                "current_duration_sec":  self._duration,
+                "current_duration_str":  format_duration(self._duration),
+                "playlist":              items,
+            }
+
+    def set_chunk_size(self, value):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            raise ValueError("chunk size must be a whole number")
+        if not (CHUNK_SIZE_MIN <= value <= CHUNK_SIZE_MAX):
+            raise ValueError(f"chunk size must be between {CHUNK_SIZE_MIN} and {CHUNK_SIZE_MAX}")
+        self.chunk_size = value
+        save_chunk_size(value)
+        return self.chunk_size
+
+    # --- direct file control (precision mode) ---
+    def load_file_and_seek(self, full_path, seek_seconds=0):
+        with self._lock:
+            self._playlist  = [full_path]
+            self._index     = 0
+            self._time_pos  = float(seek_seconds)
+            self._duration  = 120.0
+            self._paused    = False
+            self._running   = True
+
+    def show_blank(self):
+        with self._lock:
+            self._index    = None
+            self._time_pos = 0.0
+            self._duration = 0.0
+            self._paused   = True
+
+    def restart_process_only(self):
+        pass  # tidak ada proses nyata
+
+
+def make_controller():
+    """Pilih controller yang tepat berdasarkan environment:
+    - Windows atau DASHBOARD_MOCK=1 → MockMPVController (dev lokal)
+    - Linux/Pi                      → MPVController asli (produksi)
+    """
+    if os.name == "nt" or os.environ.get("DASHBOARD_MOCK") == "1":
+        return MockMPVController()
+    return MPVController()
