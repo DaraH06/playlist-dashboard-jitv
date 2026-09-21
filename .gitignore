@@ -42,7 +42,7 @@ logs/
 *.tmp
 *.bak
 # Dev-only  tidak pernah masuk ke server Pi
-create_dummy_videos
+create_dummy_videos.py
 dummy_videos/
 run_local.ps1
 
