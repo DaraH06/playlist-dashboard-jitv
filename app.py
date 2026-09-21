@@ -5,7 +5,7 @@ import io
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
-from mpv_controller import MPVController, VIDEO_ROOT, ALLOWED_EXT, safe_path
+from mpv_controller import MPVController, MockMPVController, make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
 from scheduler import Scheduler
 from precision_scheduler import PrecisionScheduler, parse_playlist_text
 
@@ -23,7 +23,10 @@ ADMIN_PASSWORD_HASH = os.environ.get(
 
 PLAYLIST_FILE = os.path.join(os.path.dirname(__file__), "playlist.json")
 
-mpv = MPVController()
+# make_controller() otomatis memilih MockMPVController di Windows (dev)
+# dan MPVController asli di Raspberry Pi (produksi) — tidak perlu edit manual.
+mpv = make_controller()
+
 
 
 def resolve_playlist_paths(items):
@@ -500,6 +503,15 @@ def api_precision_disable():
 @login_required
 def api_precision_playlists():
     return jsonify(precision.list_playlists())
+
+
+@app.route("/api/precision/playlists/<date_name>")
+@login_required
+def api_precision_playlist_detail(date_name):
+    entries = precision.get_playlist(date_name)
+    if entries is None:
+        return jsonify({"error": "Jadwal tidak ditemukan"}), 404
+    return jsonify(entries)
 
 
 # ---------- schedule ----------
