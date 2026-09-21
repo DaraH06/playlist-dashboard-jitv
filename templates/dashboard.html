@@ -53,6 +53,19 @@
     <div id="precision-detail" class="precision-detail"></div>
   </section>
 
+  <section class="fallback-panel">
+    <h2>📺 Video Pengganti (Fallback CCTV)</h2>
+    <p class="schedule-hint">
+      <strong>Cara kerja:</strong> Saat Mode Presisi aktif dan ada slot <strong>Live CCTV</strong> di jadwal,
+      sistem akan otomatis memutar video dari daftar ini (bergantian) alih-alih menampilkan layar hitam.
+      Video akan di-<em>loop</em> selama durasi slot CCTV berlangsung.
+    </p>
+    <div class="fallback-actions">
+      <button id="btn-add-fallback">+ Tambah Video Pengganti</button>
+    </div>
+    <ul id="fallback-list" class="file-list"></ul>
+  </section>
+
   <section class="queue-panel">
     <h2>Yang Sedang Berjalan di Player</h2>
     <div class="queue-columns">
@@ -114,6 +127,20 @@
           </thead>
           <tbody id="rundown-tbody"></tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Pilih Video Fallback -->
+  <div id="fallback-picker-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fallback-picker-title">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="fallback-picker-title">Pilih Video Pengganti</h3>
+        <button class="modal-close" id="btn-close-fallback-picker" aria-label="Tutup">&times;</button>
+      </div>
+      <div class="modal-body picker-body">
+        <nav id="fallback-picker-breadcrumb" class="breadcrumb"></nav>
+        <ul id="fallback-picker-list" class="file-list"></ul>
       </div>
     </div>
   </div>
