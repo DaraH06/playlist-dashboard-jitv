@@ -335,9 +335,17 @@ class PrecisionScheduler:
                 active = self._find_active(entries, now_sec)
 
                 if active is None:
-                    if self._current_entry_key is not None:
-                        self.controller.show_blank()
-                        self._current_entry_key = None
+                    # Gap between scheduled entries — play fallback if available.
+                    gap_key = (today_name, "gap")
+                    if self._current_entry_key != gap_key:
+                        fallback_path, _ = self._pick_fallback(0)
+                        if fallback_path:
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=True)
+                            self._switch_count += 1
+                            self._fallback_index += 1
+                        else:
+                            self.controller.show_blank()
+                        self._current_entry_key = gap_key
                     continue
 
                 key = (today_name, active["start"])
