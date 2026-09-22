@@ -92,13 +92,6 @@ class MPVController:
         self._last_seen_pos = None
         self._watcher_started = False
         self.chunk_size = load_chunk_size()
-        # When True, the simple mode's chunk-restart watcher (which
-        # tracks mpv's own playlist-pos) backs off entirely — precision
-        # mode doesn't use mpv's playlist feature at all (it uses
-        # "loadfile ... replace" per entry), so playlist-pos wouldn't
-        # reflect anything meaningful here, and precision mode has its
-        # own separate restart counter (see precision_scheduler.py).
-        self.precision_mode_active = False
 
     def set_chunk_size(self, value):
         try:
@@ -333,8 +326,6 @@ class MPVController:
         while True:
             time.sleep(5)
             try:
-                if self.precision_mode_active:
-                    continue
                 if not self.is_running():
                     continue
                 res = self._send(["get_property", "playlist-pos"])
@@ -353,7 +344,7 @@ class MPVController:
                 # Never let the watcher thread die silently.
                 pass
 
-    # ---------- direct file control (used by precision mode) ----------
+    # ---------- direct file control ----------
 
     def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
         """Load a single file directly (not via mpv's playlist feature)
@@ -409,7 +400,6 @@ class MockMPVController:
 
     def __init__(self, socket_path=None):
         self.chunk_size = load_chunk_size()
-        self.precision_mode_active = False
         self._lock = threading.Lock()
         self._running = False
         self._paused  = True
@@ -543,7 +533,7 @@ class MockMPVController:
         save_chunk_size(value)
         return self.chunk_size
 
-    # --- direct file control (precision mode) ---
+    # --- direct file control ---
     def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
         with self._lock:
             self._playlist  = [full_path]
