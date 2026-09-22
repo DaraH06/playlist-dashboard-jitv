@@ -340,7 +340,7 @@ class PrecisionScheduler:
                     continue
 
                 key = (today_name, active["start"])
-                if key == self._current_entry_key:
+                if key == self._current_entry_key and self.controller.is_running():
                     continue  # already playing the right thing
 
                 if active["type"] == "video":
