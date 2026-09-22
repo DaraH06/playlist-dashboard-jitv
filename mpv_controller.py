@@ -357,6 +357,7 @@ class MPVController:
             time.sleep(1)
             
         self._send(["loadfile", full_path, "replace"])
+        time.sleep(0.3)
         if seek_seconds and seek_seconds > 0:
             self._send(["seek", seek_seconds, "absolute"])
         self._send(["set_property", "loop-file", "inf" if loop else "no"])

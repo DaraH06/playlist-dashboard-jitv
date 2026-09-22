@@ -353,7 +353,7 @@ class PrecisionScheduler:
 
                 if active["type"] == "video":
                     full = os.path.join(self.video_root, active["path"])
-                    self.controller.load_file_and_seek(full, active["elapsed"])
+                    self.controller.load_file_and_seek(full, float(active["elapsed"]))
                     self._switch_count += 1
                 else:
                     # live segment, missing file, or gap:
