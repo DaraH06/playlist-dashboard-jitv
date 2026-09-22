@@ -148,7 +148,6 @@ class PrecisionScheduler:
         self.video_root = video_root
         self._lock = threading.Lock()
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
-        self.enabled = False
         self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
         self._switch_count = 0
@@ -157,10 +156,14 @@ class PrecisionScheduler:
 
     # ---------- storage ----------
 
-    def save_playlist(self, date_name, entries):
+    def save_playlist(self, date_name, entries) -> str:
+        name = (date_name or "").strip()
+        if not name:
+            raise ValueError("nama playlist tidak boleh kosong")
         with self._lock:
             self.playlists[date_name] = entries
             save_precision_playlists(self.playlists)
+        return name
 
     def list_playlists(self):
         with self._lock:
@@ -179,16 +182,6 @@ class PrecisionScheduler:
 
     # ---------- engine control ----------
 
-    def enable(self):
-        self.enabled = True
-        self.controller.precision_mode_active = True
-
-    def disable(self):
-        self.enabled = False
-        self.controller.precision_mode_active = False
-        self._current_entry_key = None
-        self.controller.show_blank()
-
     def status(self):
         with self._lock:
             today_name = datetime.now(WIB).strftime("%Y-%m-%d")
@@ -201,7 +194,6 @@ class PrecisionScheduler:
                 if future:
                     upcoming = min(future, key=lambda e: e["start"])
             return {
-                "enabled": self.enabled,
                 "today": today_name,
                 "has_schedule_today": bool(today_entries),
                 "total_entries_today": len(today_entries),
@@ -289,8 +281,6 @@ class PrecisionScheduler:
     def _loop(self):
         while True:
             time.sleep(TICK_SECONDS)
-            if not self.enabled:
-                continue
             try:
                 today_name = datetime.now(WIB).strftime("%Y-%m-%d")
                 with self._lock:
