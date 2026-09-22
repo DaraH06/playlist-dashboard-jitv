@@ -326,9 +326,17 @@ class PrecisionScheduler:
                 with self._lock:
                     entries = self.playlists.get(today_name, [])
                 if not entries:
-                    if self._current_entry_key is not None:
-                        self.controller.show_blank()
-                        self._current_entry_key = None
+                    # Tidak ada playlist hari ini — tetap putar fallback jika tersedia.
+                    no_sched_key = (today_name, "no_schedule")
+                    if self._current_entry_key != no_sched_key:
+                        fallback_path, _ = self._pick_fallback(0)
+                        if fallback_path:
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=True)
+                            self._switch_count += 1
+                            self._fallback_index += 1
+                        else:
+                            self.controller.show_blank()
+                        self._current_entry_key = no_sched_key
                     continue
 
                 now_sec = self._now_seconds()
