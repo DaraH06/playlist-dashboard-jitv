@@ -20,13 +20,57 @@ ADMIN_PASSWORD_HASH = os.environ.get(
     generate_password_hash("changeme123"),
 )
 
+PLAYLIST_FILE = os.path.join(os.path.dirname(__file__), "playlist.json")
+FALLBACK_FILE = os.path.join(os.path.dirname(__file__), "fallback_videos.json")
+
 # make_controller() otomatis memilih MockMPVController di Windows (dev)
 # dan MPVController asli di Raspberry Pi (produksi) — tidak perlu edit manual.
 mpv = make_controller()
 
 
 
-precision = PrecisionScheduler(mpv, VIDEO_ROOT)
+def resolve_playlist_paths(items):
+    """Turn a list of relative paths into full paths, silently
+    skipping anything that no longer exists (deleted/moved on the
+    share since the playlist was saved)."""
+    fullpaths = []
+    for rel in items:
+        try:
+            full = safe_path(rel)
+        except ValueError:
+            continue
+        if os.path.isfile(full):
+            fullpaths.append(full)
+    return fullpaths
+
+
+
+def load_fallback_data():
+    if not os.path.exists(FALLBACK_FILE):
+        return []
+    with open(FALLBACK_FILE) as f:
+        return json.load(f)
+
+
+def save_fallback_data(items):
+    with open(FALLBACK_FILE, "w") as f:
+        json.dump(items, f, indent=2)
+
+
+def get_fallback_fullpaths():
+    """Kembalikan list full path fallback video yang benar-benar ada."""
+    result = []
+    for rel in load_fallback_data():
+        try:
+            full = safe_path(rel)
+        except ValueError:
+            continue
+        if os.path.isfile(full):
+            result.append(full)
+    return result
+
+
+precision = PrecisionScheduler(mpv, VIDEO_ROOT, get_fallback_fullpaths)
 
 def login_required(f):
     @wraps(f)
@@ -236,6 +280,30 @@ def api_set_settings():
         "chunk_size_min": CHUNK_SIZE_MIN,
         "chunk_size_max": CHUNK_SIZE_MAX,
     })
+
+
+# ---------- fallback videos (pengganti slot live CCTV / gap) ----------
+
+@app.route("/api/fallback-videos", methods=["GET"])
+@login_required
+def api_get_fallback_videos():
+    return jsonify(load_fallback_data())
+
+
+@app.route("/api/fallback-videos", methods=["POST"])
+@login_required
+def api_set_fallback_videos():
+    items = request.json.get("items", [])
+    valid = []
+    for rel in items:
+        try:
+            full = safe_path(rel)
+        except ValueError:
+            continue
+        if os.path.isfile(full):
+            valid.append(rel)
+    save_fallback_data(valid)
+    return jsonify({"status": "ok", "items": valid})
 
 
 # ---------- named playlists----------

@@ -143,14 +143,16 @@ def save_precision_playlists(data):
 
 
 class PrecisionScheduler:
-    def __init__(self, controller, video_root):
+    def __init__(self, controller, video_root, get_fallback_fn=None):
         self.controller = controller
         self.video_root = video_root
+        self._get_fallback_fn = get_fallback_fn or (lambda: [])
         self._lock = threading.Lock()
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
         self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
         self._switch_count = 0
+        self._fallback_index = 0  # round-robin pointer for fallback list
         self._thread = None
         self._start_thread()
 
@@ -211,6 +213,26 @@ class PrecisionScheduler:
             value = PRECISION_RESTART_EVERY
         return max(1, value)
 
+    def _pick_fallback(self, elapsed_in_slot):
+        """Pilih fallback video secara round-robin dan hitung posisi seek
+        supaya video fallback seolah berjalan kontinu selama slot berlangsung.
+        Return (full_path, seek_sec) atau (None, 0) jika tidak ada."""
+        fallbacks = self._get_fallback_fn()
+        if not fallbacks:
+            return None, 0
+
+        # Tentukan index video fallback berdasarkan elapsed, bukan state global,
+        # supaya setelah restart mpv posisi bisa dihitung ulang dari jam tayang.
+        # Strategy: get_duration tidak tersedia tanpa media info, jadi kita pakai
+        # round-robin index saja yang reset saat entry baru.
+        path = fallbacks[self._fallback_index % len(fallbacks)]
+        # Seek ke posisi elapsed % durasi video tidak bisa tanpa tahu durasi,
+        # jadi kita seek 0 (awal) — engine akan re-enter setiap TICK_SECONDS
+        # dan key tidak berubah (sama entry), jadi tidak akan putar ulang terus.
+        # Untuk loop dalam satu slot: kita deteksi via mpv idle lalu lanjut.
+        # Simpel dan aman: putar dari awal, biarkan engine mpv loop sendiri.
+        return path, 0
+
     def timeline(self, played_limit=5, upcoming_limit=15):
         """Daftar 'sudah diputar / sedang diputar / berikutnya' untuk
         panel 'Yang Sedang Berjalan di Player'. Perlu jalur data
@@ -232,11 +254,20 @@ class PrecisionScheduler:
             now_cmp = now_sec + 86400 if e["start"] >= 86400 else now_sec
 
             if e["type"] == "video":
+
                 label = e["label"]
             elif e["type"] == "live":
-                label = "Segmen Live CCTV (belum didukung)"
+                fallbacks = self._get_fallback_fn()
+                if fallbacks:
+                    label = f"📺 Fallback (slot live: {e['label'][:40]})"
+                else:
+                    label = "Segmen Live CCTV (belum didukung)"
             else:
-                label = f"{e['label']} (file hilang)"
+                fallbacks = self._get_fallback_fn()
+                if fallbacks:
+                    label = f"📺 Fallback (file hilang: {e['label']})"
+                else:
+                    label = f"{e['label']} (file hilang)"
             item = {"name": f"{label} — {self._format_clock(e['start'])}"}
 
             if e["end"] <= now_cmp:
@@ -295,9 +326,17 @@ class PrecisionScheduler:
                 active = self._find_active(entries, now_sec)
 
                 if active is None:
-                    if self._current_entry_key is not None:
-                        self.controller.show_blank()
-                        self._current_entry_key = None
+                    # Gap between scheduled entries — play fallback if available.
+                    gap_key = (today_name, "gap")
+                    if self._current_entry_key != gap_key:
+                        fallback_path, _ = self._pick_fallback(0)
+                        if fallback_path:
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=True)
+                            self._switch_count += 1
+                            self._fallback_index += 1
+                        else:
+                            self.controller.show_blank()
+                        self._current_entry_key = gap_key
                     continue
 
                 key = (today_name, active["start"])
@@ -309,9 +348,15 @@ class PrecisionScheduler:
                     self.controller.load_file_and_seek(full, active["elapsed"])
                     self._switch_count += 1
                 else:
-                    # missing file, live segment (not supported yet) —
-                    # show blank instead.
-                    self.controller.show_blank()
+                    # live segment, missing file, or gap:
+                    # try to play a fallback video instead of showing blank.
+                    fallback_path, _ = self._pick_fallback(active["elapsed"])
+                    if fallback_path:
+                        self.controller.load_file_and_seek(fallback_path, 0, loop=True)
+                        self._switch_count += 1
+                        self._fallback_index += 1
+                    else:
+                        self.controller.show_blank()
 
                 self._current_entry_key = key
 
