@@ -489,13 +489,6 @@ async function loadPrecisionStatus() {
   detail.innerHTML = html;
 }
 
-document.getElementById("btn-toggle-precision").onclick = async () => {
-  const s = await api("/api/precision/status");
-  const endpoint = s.enabled ? "/api/precision/disable" : "/api/precision/enable";
-  await api(endpoint, { method: "POST" });
-  loadPrecisionStatus();
-};
-
 browseTo("");
 loadChunkSizeSetting();
 loadNamedPlaylists();

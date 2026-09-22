@@ -6,7 +6,6 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from mpv_controller import MPVController, MockMPVController, make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
-from scheduler import Scheduler
 from precision_scheduler import PrecisionScheduler, parse_playlist_text
 
 app = Flask(__name__)
@@ -21,33 +20,13 @@ ADMIN_PASSWORD_HASH = os.environ.get(
     generate_password_hash("changeme123"),
 )
 
-PLAYLIST_FILE = os.path.join(os.path.dirname(__file__), "playlist.json")
-
 # make_controller() otomatis memilih MockMPVController di Windows (dev)
 # dan MPVController asli di Raspberry Pi (produksi) — tidak perlu edit manual.
 mpv = make_controller()
 
 
 
-def resolve_playlist_paths(items):
-    """Turn a list of relative paths into full paths, silently
-    skipping anything that no longer exists (deleted/moved on the
-    share since the playlist was saved)."""
-    fullpaths = []
-    for rel in items:
-        try:
-            full = safe_path(rel)
-        except ValueError:
-            continue
-        if os.path.isfile(full):
-            fullpaths.append(full)
-    return fullpaths
-
-
-scheduler = Scheduler(mpv, resolve_playlist_paths)
 precision = PrecisionScheduler(mpv, VIDEO_ROOT)
-scheduler.is_precision_active = lambda: precision.enabled
-
 
 def login_required(f):
     @wraps(f)
@@ -56,18 +35,6 @@ def login_required(f):
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
-
-
-def load_playlist_data():
-    if not os.path.exists(PLAYLIST_FILE):
-        return []
-    with open(PLAYLIST_FILE) as f:
-        return json.load(f)
-
-
-def save_playlist_data(items):
-    with open(PLAYLIST_FILE, "w") as f:
-        json.dump(items, f, indent=2)
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -140,28 +107,6 @@ def api_browse():
     })
 
 
-@app.route("/api/playlist", methods=["GET"])
-@login_required
-def api_get_playlist():
-    return jsonify(load_playlist_data())
-
-
-@app.route("/api/playlist", methods=["POST"])
-@login_required
-def api_set_playlist():
-    items = request.json.get("items", [])
-    valid = []
-    for rel in items:
-        try:
-            full = safe_path(rel)
-        except ValueError:
-            continue
-        if os.path.isfile(full):
-            valid.append(rel)
-    save_playlist_data(valid)
-    return jsonify({"status": "ok", "items": valid})
-
-
 @app.route("/api/import-playlist", methods=["POST"])
 @login_required
 def api_import_playlist():
@@ -222,14 +167,6 @@ def api_import_playlist():
     return jsonify({"matched": matched, "not_found": not_found})
 
 
-@app.route("/api/apply", methods=["POST"])
-@login_required
-def api_apply():
-    items = load_playlist_data()
-    fullpaths = resolve_playlist_paths(items)
-    return jsonify(mpv.load_playlist(fullpaths))
-
-
 @app.route("/api/play", methods=["POST"])
 @login_required
 def api_play():
@@ -264,14 +201,13 @@ def api_prev():
 @login_required
 def api_status():
     data = mpv.status()
-    if precision.enabled:
         # mpv's own playlist selalu cuma 1 entri di Mode Presisi (lihat
         # docstring PrecisionScheduler.timeline) — pakai daftar
         # sudah-diputar/berikutnya dari jadwal presisi sbg gantinya.
-        p_status = precision.status()
-        data["precision_timeline"] = precision.timeline()
-        data["precision_switch_count"] = p_status["switch_count"]
-        data["precision_restart_every"] = p_status["restart_every"]
+    p_status = precision.status()
+    data["precision_timeline"] = precision.timeline()
+    data["precision_switch_count"] = p_status["switch_count"]
+    data["precision_restart_every"] = p_status["restart_every"]
     return jsonify(data)
 
 
@@ -302,31 +238,18 @@ def api_set_settings():
     })
 
 
-# ---------- named playlists (used by the schedule) ----------
+# ---------- named playlists----------
 
 @app.route("/api/named-playlists", methods=["GET"])
 @login_required
 def api_list_named_playlists():
-    return jsonify(scheduler.list_playlists())
-
-
-@app.route("/api/named-playlists", methods=["POST"])
-@login_required
-def api_save_named_playlist():
-    name = request.json.get("name", "")
-    items = request.json.get("items", [])
-    valid = [rel for rel in items if os.path.isfile(safe_path(rel))] if items else []
-    try:
-        saved_name = scheduler.save_playlist(name, valid)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify({"status": "ok", "name": saved_name, "items": valid})
+    return jsonify(precision.list_playlists())
 
 
 @app.route("/api/named-playlists/<name>", methods=["DELETE"])
 @login_required
 def api_delete_named_playlist(name):
-    scheduler.delete_playlist(name)
+    precision.delete_playlist(name)
     return jsonify({"status": "ok"})
 
 
@@ -385,8 +308,6 @@ def _ingest_playlist_text(text, playlist_name, filename_index):
             not_found.append(basename)
 
     saved_name = None
-    if matched:
-        saved_name = scheduler.save_playlist(playlist_name, matched)
 
     # Sekalian bikin versi presisi (dengan timecode asli), dipakai
     # oleh Mode Jadwal Presisi — parsing ulang teks yang sama tapi
@@ -394,7 +315,7 @@ def _ingest_playlist_text(text, playlist_name, filename_index):
     # ikut kebaca dengan benar.
     precision_entries = parse_playlist_text(text, VIDEO_ROOT, safe_path, filename_index)
     if precision_entries:
-        precision.save_playlist(playlist_name, precision_entries)
+        saved_name = precision.save_playlist(playlist_name, precision_entries)
 
     return {
         "date": playlist_name,
@@ -485,26 +406,6 @@ def api_precision_status():
     return jsonify(precision.status())
 
 
-@app.route("/api/precision/enable", methods=["POST"])
-@login_required
-def api_precision_enable():
-    precision.enable()
-    return jsonify({"status": "ok", "enabled": True})
-
-
-@app.route("/api/precision/disable", methods=["POST"])
-@login_required
-def api_precision_disable():
-    precision.disable()
-    return jsonify({"status": "ok", "enabled": False})
-
-
-@app.route("/api/precision/playlists")
-@login_required
-def api_precision_playlists():
-    return jsonify(precision.list_playlists())
-
-
 @app.route("/api/precision/playlists/<date_name>")
 @login_required
 def api_precision_playlist_detail(date_name):
@@ -512,39 +413,6 @@ def api_precision_playlist_detail(date_name):
     if entries is None:
         return jsonify({"error": "Jadwal tidak ditemukan"}), 404
     return jsonify(entries)
-
-
-# ---------- schedule ----------
-
-@app.route("/api/schedule", methods=["GET"])
-@login_required
-def api_list_schedule():
-    return jsonify(scheduler.status())
-
-
-@app.route("/api/schedule", methods=["POST"])
-@login_required
-def api_add_schedule_entry():
-    body = request.json or {}
-    try:
-        entry = scheduler.add_entry(
-            time_str=body.get("time", ""),
-            playlist_name=body.get("playlist_name", ""),
-            recurrence=body.get("recurrence", ""),
-            days=body.get("days"),
-            date=body.get("date"),
-        )
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify({"status": "ok", "entry": entry})
-
-
-@app.route("/api/schedule/<entry_id>", methods=["DELETE"])
-@login_required
-def api_delete_schedule_entry(entry_id):
-    scheduler.delete_entry(entry_id)
-    return jsonify({"status": "ok"})
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, threaded=True)
