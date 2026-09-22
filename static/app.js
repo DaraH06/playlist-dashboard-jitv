@@ -449,19 +449,8 @@ function formatClock(totalSeconds) {
 
 async function loadPrecisionStatus() {
   const s = await api("/api/precision/status");
-  const dot = document.getElementById("precision-dot");
   const text = document.getElementById("precision-status-text");
-  const btn = document.getElementById("btn-toggle-precision");
   const detail = document.getElementById("precision-detail");
-
-  dot.classList.toggle("on", s.enabled);
-  btn.textContent = s.enabled ? "Matikan Mode Presisi" : "Aktifkan Mode Presisi";
-
-  if (!s.enabled) {
-    text.textContent = "Mode presisi tidak aktif (pakai kontrol manual di atas)";
-    detail.innerHTML = "";
-    return;
-  }
 
   if (!s.has_schedule_today) {
     text.textContent = `Aktif, tapi tidak ada jadwal presisi untuk hari ini (${s.today})`;
