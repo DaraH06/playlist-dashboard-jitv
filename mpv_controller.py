@@ -352,6 +352,10 @@ class MPVController:
         to start a video exactly where it should be right now, instead
         of always starting from 0:00. Set loop=True for fallback videos
         that should repeat until the next scheduled slot starts."""
+        if not self.is_running():
+            self.start()
+            time.sleep(1)
+            
         self._send(["loadfile", full_path, "replace"])
         if seek_seconds and seek_seconds > 0:
             self._send(["seek", seek_seconds, "absolute"])
