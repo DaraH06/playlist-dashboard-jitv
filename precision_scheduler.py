@@ -149,7 +149,6 @@ class PrecisionScheduler:
         self._get_fallback_fn = get_fallback_fn or (lambda: [])
         self._lock = threading.Lock()
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
-        self.enabled = False
         self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
         self._switch_count = 0
@@ -159,10 +158,14 @@ class PrecisionScheduler:
 
     # ---------- storage ----------
 
-    def save_playlist(self, date_name, entries):
+    def save_playlist(self, date_name, entries) -> str:
+        name = (date_name or "").strip()
+        if not name:
+            raise ValueError("nama playlist tidak boleh kosong")
         with self._lock:
             self.playlists[date_name] = entries
             save_precision_playlists(self.playlists)
+        return name
 
     def list_playlists(self):
         with self._lock:
@@ -181,16 +184,6 @@ class PrecisionScheduler:
 
     # ---------- engine control ----------
 
-    def enable(self):
-        self.enabled = True
-        self.controller.precision_mode_active = True
-
-    def disable(self):
-        self.enabled = False
-        self.controller.precision_mode_active = False
-        self._current_entry_key = None
-        self.controller.show_blank()
-
     def status(self):
         with self._lock:
             today_name = datetime.now(WIB).strftime("%Y-%m-%d")
@@ -203,7 +196,6 @@ class PrecisionScheduler:
                 if future:
                     upcoming = min(future, key=lambda e: e["start"])
             return {
-                "enabled": self.enabled,
                 "today": today_name,
                 "has_schedule_today": bool(today_entries),
                 "total_entries_today": len(today_entries),
@@ -261,7 +253,8 @@ class PrecisionScheduler:
             # bandingkan ke "now + 24 jam" biar masuk kelompok yg benar.
             now_cmp = now_sec + 86400 if e["start"] >= 86400 else now_sec
 
-            if e["type"] == "video":
+            if e["type"] == "video":
+
                 label = e["label"]
             elif e["type"] == "live":
                 fallbacks = self._get_fallback_fn()
@@ -319,16 +312,22 @@ class PrecisionScheduler:
     def _loop(self):
         while True:
             time.sleep(TICK_SECONDS)
-            if not self.enabled:
-                continue
             try:
                 today_name = datetime.now(WIB).strftime("%Y-%m-%d")
                 with self._lock:
                     entries = self.playlists.get(today_name, [])
                 if not entries:
-                    if self._current_entry_key is not None:
-                        self.controller.show_blank()
-                        self._current_entry_key = None
+                    # Tidak ada playlist hari ini — tetap putar fallback jika tersedia.
+                    no_sched_key = (today_name, "no_schedule")
+                    if self._current_entry_key != no_sched_key:
+                        fallback_path, _ = self._pick_fallback(0)
+                        if fallback_path:
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=True)
+                            self._switch_count += 1
+                            self._fallback_index += 1
+                        else:
+                            self.controller.show_blank()
+                        self._current_entry_key = no_sched_key
                     continue
 
                 now_sec = self._now_seconds()
@@ -349,12 +348,12 @@ class PrecisionScheduler:
                     continue
 
                 key = (today_name, active["start"])
-                if key == self._current_entry_key:
+                if key == self._current_entry_key and self.controller.is_running():
                     continue  # already playing the right thing
 
                 if active["type"] == "video":
                     full = os.path.join(self.video_root, active["path"])
-                    self.controller.load_file_and_seek(full, active["elapsed"])
+                    self.controller.load_file_and_seek(full, float(active["elapsed"]))
                     self._switch_count += 1
                 else:
                     # live segment, missing file, or gap:
