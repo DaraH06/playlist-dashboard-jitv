@@ -45,7 +45,7 @@ except Exception:
 _BROADCAST_START_HOUR_DEFAULT = 6
 
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
-TICK_SECONDS = 2
+TICK_SECONDS = 1
 PRECISION_RESTART_EVERY = 20  # same rationale/value as simple-mode chunk_size default
 
 TIMECODE_RE = re.compile(r"^(\d+):(\d{2}):(\d{2}):(\d{2})$")
