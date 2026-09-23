@@ -223,15 +223,13 @@ class PrecisionScheduler:
 
     def _pick_fallback(self, elapsed_in_slot=0):
         """Pilih fallback video secara round-robin.
-        - 1 video  -> loop=True (putar terus)
-        - 2+ video -> loop=False (bergantian round-robin setiap video selesai)
-        Return (full_path, should_loop) atau (None, False) jika tidak ada."""
+        Setiap video diputar sekali sampai selesai, lalu otomatis lanjut
+        ke video berikutnya (atau loop video yang sama jika cuma ada 1).
+        Return full_path atau None jika tidak ada."""
         fallbacks = self._get_fallback_fn()
         if not fallbacks:
-            return None, False
-        should_loop = (len(fallbacks) == 1)
-        path = fallbacks[self._fallback_index % len(fallbacks)]
-        return path, should_loop
+            return None
+        return fallbacks[self._fallback_index % len(fallbacks)]
 
     def timeline(self, played_limit=5, upcoming_limit=15):
         """Daftar 'sudah diputar / sedang diputar / berikutnya' untuk
@@ -374,17 +372,17 @@ class PrecisionScheduler:
                         entries = self.playlists.get(today_name, [])
                 if not entries:
                     # Tidak ada playlist hari ini — tetap putar fallback jika tersedia.
-                    fallback_path, should_loop = self._pick_fallback(0)
+                    fallback_path = self._pick_fallback(0)
                     no_sched_key = (today_name, "no_schedule", fallback_path, self._fallback_index)
 
-                    if self._current_entry_key == no_sched_key and self.controller.is_idle() and not should_loop:
+                    if self._current_entry_key == no_sched_key and self.controller.is_idle():
                         self._fallback_index += 1
-                        fallback_path, should_loop = self._pick_fallback(0)
+                        fallback_path = self._pick_fallback(0)
                         no_sched_key = (today_name, "no_schedule", fallback_path, self._fallback_index)
 
                     if self._current_entry_key != no_sched_key:
                         if fallback_path:
-                            self.controller.load_file_and_seek(fallback_path, 0, loop=should_loop)
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=False)
                             self._switch_count += 1
                         else:
                             self.controller.show_blank()
@@ -399,17 +397,17 @@ class PrecisionScheduler:
                     # playlist atau playlist sudah selesai semuanya.
                     max_end = max(e["end"] for e in entries) if entries else 0
                     gap_reason = "end" if now_sec >= max_end else "gap"
-                    fallback_path, should_loop = self._pick_fallback(0)
+                    fallback_path = self._pick_fallback(0)
                     gap_key = (today_name, gap_reason, fallback_path, self._fallback_index)
 
-                    if self._current_entry_key == gap_key and self.controller.is_idle() and not should_loop:
+                    if self._current_entry_key == gap_key and self.controller.is_idle():
                         self._fallback_index += 1
-                        fallback_path, should_loop = self._pick_fallback(0)
+                        fallback_path = self._pick_fallback(0)
                         gap_key = (today_name, gap_reason, fallback_path, self._fallback_index)
 
                     if self._current_entry_key != gap_key:
                         if fallback_path:
-                            self.controller.load_file_and_seek(fallback_path, 0, loop=should_loop)
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=False)
                             self._switch_count += 1
                         else:
                             self.controller.show_blank()
@@ -428,17 +426,17 @@ class PrecisionScheduler:
                 else:
                     # live segment, missing file, or gap:
                     # try to play a fallback video instead of showing blank.
-                    fallback_path, should_loop = self._pick_fallback(active["elapsed"])
+                    fallback_path = self._pick_fallback(active["elapsed"])
                     live_key = (today_name, active["start"], fallback_path, self._fallback_index)
 
-                    if self._current_entry_key == live_key and self.controller.is_idle() and not should_loop:
+                    if self._current_entry_key == live_key and self.controller.is_idle():
                         self._fallback_index += 1
-                        fallback_path, should_loop = self._pick_fallback(active["elapsed"])
+                        fallback_path = self._pick_fallback(active["elapsed"])
                         live_key = (today_name, active["start"], fallback_path, self._fallback_index)
 
                     if self._current_entry_key != live_key:
                         if fallback_path:
-                            self.controller.load_file_and_seek(fallback_path, 0, loop=should_loop)
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=False)
                             self._switch_count += 1
                         else:
                             self.controller.show_blank()
