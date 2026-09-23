@@ -166,6 +166,8 @@ class MPVController:
         cmd = [
             "mpv",
             "--idle=yes",
+            "--force-window=yes",
+            "--keep-open=yes",
             f"--input-ipc-server={self.socket_path}",
             "--fullscreen",
             "--vo=gpu",
@@ -377,11 +379,12 @@ class MPVController:
             time.sleep(1)
             
         self._send(["loadfile", full_path, "replace"])
-        time.sleep(0.3)
-        if seek_seconds and seek_seconds > 0:
-            self._send(["seek", seek_seconds, "absolute"])
+        self._send(["set_property", "keep-open", "yes"])
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
         self._send(["set_property", "loop-playlist", "inf" if loop else "no"])
+        if seek_seconds and seek_seconds > 0:
+            time.sleep(0.1)
+            self._send(["seek", seek_seconds, "absolute"])
         self._send(["set_property", "pause", False])
 
     def show_blank(self):
