@@ -244,6 +244,15 @@ class MPVController:
         data = res.get("data")
         return data if isinstance(data, list) else []
 
+    def is_idle(self):
+        if not self.is_running():
+            return True
+        idle = self._send(["get_property", "idle-active"])
+        if idle.get("data") is True:
+            return True
+        path = self._send(["get_property", "path"])
+        return not path.get("data")
+
     def status(self):
         if not self.is_running():
             return {"running": False, "playlist": []}
@@ -423,21 +432,27 @@ class MockMPVController:
                 if self._running and not self._paused and self._duration > 0:
                     self._time_pos += 1
                     if self._time_pos >= self._duration:
-                        # Pindah ke video berikutnya dalam playlist
-                        if self._index is not None and self._index + 1 < len(self._playlist):
+                        if getattr(self, "_loop_file", False):
+                            self._time_pos = 0.0
+                        elif self._index is not None and self._index + 1 < len(self._playlist):
                             self._index   += 1
                             self._time_pos = 0.0
                             self._duration = 120.0  # durasi tiruan 2 menit per video
                             self._chunk_progress += 1
                         else:
-                            # playlist habis — loop dari awal
-                            if self._playlist:
-                                self._index    = 0
-                                self._time_pos = 0.0
+                            # video selesai (tanpa loop) -> masuk state idle
+                            self._index    = None
+                            self._time_pos = 0.0
+                            self._duration = 0.0
+                            self._playlist = []
 
     # --- process management (no-op on Windows) ---
     def is_running(self):
         return self._running
+
+    def is_idle(self):
+        with self._lock:
+            return not self._running or self._index is None or not self._playlist
 
     def start(self):
         with self._lock:
@@ -545,6 +560,7 @@ class MockMPVController:
             self._index     = 0
             self._time_pos  = float(seek_seconds)
             self._duration  = 120.0
+            self._loop_file = bool(loop)
             self._paused    = False
             self._running   = True
 
