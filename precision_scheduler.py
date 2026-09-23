@@ -154,8 +154,6 @@ class PrecisionScheduler:
         self._get_fallback_fn = get_fallback_fn or (lambda: [])
         self._lock = threading.Lock()
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
-        self.enabled = True
-        self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
         self._switch_count = 0
         self._fallback_index = 0  # round-robin pointer for fallback list
@@ -188,18 +186,6 @@ class PrecisionScheduler:
             self.playlists.pop(date_name, None)
             save_precision_playlists(self.playlists)
 
-    # ---------- engine control ----------
-
-    def enable(self):
-        self.enabled = True
-        self.controller.precision_mode_active = True
-
-    def disable(self):
-        self.enabled = False
-        self.controller.precision_mode_active = False
-        self._current_entry_key = None
-        self.controller.show_blank()
-
     def status(self):
         with self._lock:
             # Deteksi awal tanpa entries untuk dapat tanggal siaran
@@ -217,7 +203,7 @@ class PrecisionScheduler:
                 if future:
                     upcoming = min(future, key=lambda e: e["start"])
             return {
-                "enabled": self.enabled,
+                "enabled": True,
                 "today": today_name,
                 "has_schedule_today": bool(today_entries),
                 "total_entries_today": len(today_entries),
@@ -377,8 +363,6 @@ class PrecisionScheduler:
     def _loop(self):
         while True:
             time.sleep(TICK_SECONDS)
-            if not self.enabled:
-                continue
             try:
                 today_name = self._broadcast_date()  # deteksi awal tanpa entries
                 with self._lock:
