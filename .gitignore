@@ -54,3 +54,16 @@ schedule.json
 settings.json
 
 precision_playlists.json
+
+.gitignore
+generated_playlists.py
+
+PLAN_PENGEMBANGAN_FFMPEG_RTMP.md
+WALKTHROUGH_FFMPEG_MEDIAMTX_LOCAL.md
+
+# Local dev config — berisi kredensial & path lokal
+.env
+.env.local
+
+# Generated playlist files
+*.playlist

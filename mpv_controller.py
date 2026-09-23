@@ -355,6 +355,26 @@ class MPVController:
 
     # ---------- direct file control ----------
 
+    def _wait_for_file_loaded(self, full_path, timeout=15):
+        """Wait until mpv has finished opening a file before seeking.
+
+        ``loadfile`` is asynchronous.  A fixed short sleep is unreliable on
+        the Pi because videos are read from a network share, so the following
+        seek can otherwise arrive before mpv has a seekable timeline.
+        """
+        expected = os.path.normcase(os.path.abspath(full_path))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            path = self._send(["get_property", "path"]).get("data")
+            if path:
+                actual = os.path.normcase(os.path.abspath(str(path)))
+                if actual == expected:
+                    duration = self._send(["get_property", "duration"]).get("data")
+                    if isinstance(duration, (int, float)) and duration > 0:
+                        return True
+            time.sleep(0.1)
+        return False
+
     def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
         """Load a single file directly (not via mpv's playlist feature)
         and jump to the given position. Used by the precision scheduler
@@ -365,10 +385,19 @@ class MPVController:
             self.start()
             time.sleep(1)
             
-        self._send(["loadfile", full_path, "replace"])
-        time.sleep(0.3)
+        # Keep the new file paused while mpv opens its demuxer.  Without
+        # this, mpv can begin at 0:00 before the scheduled seek is handled.
+        self._send(["loadfile", full_path, "replace", {"pause": True}])
+        self._wait_for_file_loaded(full_path)
         if seek_seconds and seek_seconds > 0:
-            self._send(["seek", seek_seconds, "absolute"])
+            # The first seek can still race mpv's demuxer on a slow network
+            # mount.  Retry briefly until mpv reports the requested position.
+            for _ in range(3):
+                self._send(["seek", seek_seconds, "absolute"])
+                time.sleep(0.2)
+                position = self._send(["get_property", "time-pos"]).get("data")
+                if isinstance(position, (int, float)) and abs(position - seek_seconds) <= 2:
+                    break
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
         self._send(["set_property", "pause", False])
 
@@ -577,9 +606,45 @@ class MockMPVController:
 
 def make_controller():
     """Pilih controller yang tepat berdasarkan environment:
-    - Windows atau DASHBOARD_MOCK=1 → MockMPVController (dev lokal)
-    - Linux/Pi                      → MPVController asli (produksi)
+
+    DASHBOARD_PLAYER=ffmpeg  → FFmpegController (publish ke RTMP)
+    DASHBOARD_PLAYER=mpv     → MPVController / MockMPVController (existing)
+    (tidak diset)            → behaviour lama: mock di Windows, MPV di Linux
     """
+    player = os.environ.get("DASHBOARD_PLAYER", "").lower()
+
+    if player == "ffmpeg":
+        rtmp_url = os.environ.get("DASHBOARD_RTMP_URL", "")
+        if not rtmp_url:
+            raise RuntimeError(
+                "DASHBOARD_PLAYER=ffmpeg tapi DASHBOARD_RTMP_URL tidak diset. "
+                "Set DASHBOARD_RTMP_URL ke URL RTMP tujuan (mis. rtmp://127.0.0.1:1935/live/jitv)."
+            )
+        encoder = os.environ.get("DASHBOARD_ENCODER", "libx264")
+        fps     = os.environ.get("DASHBOARD_FPS", "25")
+        print(f"[dashboard] backend  : ffmpeg")
+        print(f"[dashboard] encoder  : {encoder}")
+        print(f"[dashboard] rtmp     : {rtmp_url}")
+        print(f"[dashboard] fps      : {fps}")
+        # Import di sini untuk menghindari circular import saat mpv_controller
+        # di-import oleh ffmpeg_controller itu sendiri.
+        from ffmpeg_controller import FFmpegController
+        return FFmpegController(rtmp_url=rtmp_url, encoder=encoder, fps=fps)
+
+    if player == "mpv":
+        _backend = "mpv (mock)" if (os.name == "nt" or os.environ.get("DASHBOARD_MOCK") == "1") else "mpv"
+        print(f"[dashboard] backend  : {_backend}")
+        if os.name == "nt" or os.environ.get("DASHBOARD_MOCK") == "1":
+            return MockMPVController()
+        return MPVController()
+
+    if player and player not in ("ffmpeg", "mpv"):
+        raise RuntimeError(
+            f"DASHBOARD_PLAYER='{player}' tidak dikenali. "
+            "Gunakan 'ffmpeg' atau 'mpv'."
+        )
+
+    # Default (tidak diset): behaviour lama
     if os.name == "nt" or os.environ.get("DASHBOARD_MOCK") == "1":
         return MockMPVController()
     return MPVController()
