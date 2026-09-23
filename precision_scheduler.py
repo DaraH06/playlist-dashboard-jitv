@@ -164,10 +164,14 @@ class PrecisionScheduler:
 
     # ---------- storage ----------
 
-    def save_playlist(self, date_name, entries):
+    def save_playlist(self, date_name, entries) -> str:
+        name = (date_name or "").strip()
+        if not name:
+            raise ValueError("nama playlist tidak boleh kosong")
         with self._lock:
             self.playlists[date_name] = entries
             save_precision_playlists(self.playlists)
+        return name
 
     def list_playlists(self):
         with self._lock:
@@ -274,7 +278,6 @@ class PrecisionScheduler:
             now_cmp = now_sec
 
             if e["type"] == "video":
-
                 label = e["label"]
             elif e["type"] == "live":
                 fallbacks = self._get_fallback_fn()
@@ -385,13 +388,10 @@ class PrecisionScheduler:
             if not self.enabled:
                 continue
             try:
-                today_name = self._broadcast_date()  # belum ada entries, pakai fallback
+                today_name = self._broadcast_date()  # deteksi awal tanpa entries
                 with self._lock:
                     entries = self.playlists.get(today_name, [])
-                if not entries:
-                    # Coba deteksi ulang tanggal siaran tanpa entries (settings/default)
-                    pass
-                else:
+                if entries:
                     # Re-detect tanggal siaran dengan anchor dari playlist aktif
                     today_name = self._broadcast_date(entries)
                     with self._lock:
@@ -432,12 +432,12 @@ class PrecisionScheduler:
                     continue
 
                 key = (today_name, active["start"])
-                if key == self._current_entry_key:
+                if key == self._current_entry_key and self.controller.is_running():
                     continue  # already playing the right thing
 
                 if active["type"] == "video":
                     full = os.path.join(self.video_root, active["path"])
-                    self.controller.load_file_and_seek(full, active["elapsed"])
+                    self.controller.load_file_and_seek(full, float(active["elapsed"]))
                     self._switch_count += 1
                 else:
                     # live segment, missing file, or gap:
