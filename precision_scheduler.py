@@ -39,6 +39,11 @@ try:
 except Exception:
     WIB = timezone(timedelta(hours=7))
 
+# Jam mulai siaran default. Dipakai hanya jika tidak ada playlist aktif
+# untuk auto-detect, dan tidak ada override di settings.json.
+# Nilai aman: 6 (mencakup siaran yg mulai 06:00–08:00 WIB).
+_BROADCAST_START_HOUR_DEFAULT = 6
+
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
 TICK_SECONDS = 2
 PRECISION_RESTART_EVERY = 20  # same rationale/value as simple-mode chunk_size default
@@ -193,9 +198,14 @@ class PrecisionScheduler:
 
     def status(self):
         with self._lock:
-            today_name = datetime.now(WIB).strftime("%Y-%m-%d")
+            # Deteksi awal tanpa entries untuk dapat tanggal siaran
+            today_name = self._broadcast_date()
             today_entries = self.playlists.get(today_name, [])
-            now_sec = self._now_seconds()
+            # Re-detect dengan entries agar anchor jam akurat
+            if today_entries:
+                today_name = self._broadcast_date(today_entries)
+                today_entries = self.playlists.get(today_name, today_entries)
+            now_sec = self._now_seconds(today_entries or None)
             current = self._find_active(today_entries, now_sec) if today_entries else None
             upcoming = None
             if today_entries:
@@ -250,18 +260,21 @@ class PrecisionScheduler:
         yang berguna — daftar itu harus diturunkan dari jadwal
         presisi hari ini, bukan dari mpv."""
         with self._lock:
-            today_name = datetime.now(WIB).strftime("%Y-%m-%d")
+            today_name = self._broadcast_date()  # deteksi awal
             entries = list(self.playlists.get(today_name, []))
-        now_sec = self._now_seconds()
+            if entries:
+                today_name = self._broadcast_date(entries)  # re-detect dengan anchor akurat
+                entries = list(self.playlists.get(today_name, entries))
+        now_sec = self._now_seconds(entries or None)
 
         played, playing, upcoming = [], [], []
         for e in entries:
-            # Entri dgn start >= 24 jam = waktu setelah tengah malam yg
-            # masih milik jadwal hari ini (lihat timecode_to_seconds) —
-            # bandingkan ke "now + 24 jam" biar masuk kelompok yg benar.
-            now_cmp = now_sec + 86400 if e["start"] >= 86400 else now_sec
+            # now_sec sudah dalam skala timecode broadcast (monoton melewati
+            # tengah malam), jadi tidak perlu koreksi +86400 lagi.
+            now_cmp = now_sec
 
-            if e["type"] == "video":
+            if e["type"] == "video":
+
                 label = e["label"]
             elif e["type"] == "live":
                 fallbacks = self._get_fallback_fn()
@@ -299,21 +312,71 @@ class PrecisionScheduler:
 
     # ---------- engine internals ----------
 
-    @staticmethod
-    def _now_seconds():
+    def _broadcast_start_hour(self, entries=None):
+        """Tentukan jam anchor siaran secara otomatis.
+        Prioritas:
+          1. Entry paling awal di playlist aktif (auto-detect).
+          2. settings.json key 'broadcast_start_hour'.
+          3. _BROADCAST_START_HOUR_DEFAULT (6).
+        """
+        # 1. Auto-detect dari playlist
+        if entries:
+            min_start = min(e["start"] for e in entries)
+            # min_start dalam detik timecode, misal 28800 = 08:00
+            # Ambil jam-nya (floor), pastikan dalam rentang wajar 0–12
+            detected = int(min_start // 3600)
+            if 0 <= detected <= 12:
+                return detected
+
+        # 2. Dari settings.json
+        try:
+            settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
+            with open(settings_path) as f:
+                val = json.load(f).get("broadcast_start_hour")
+            if val is not None:
+                return int(val)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+        # 3. Default
+        return _BROADCAST_START_HOUR_DEFAULT
+
+    def _broadcast_date_and_seconds(self, entries=None):
+        """Kembalikan (date_str, broadcast_seconds) di mana broadcast_seconds
+        adalah jumlah detik sejak anchor siaran pada tanggal siaran.
+        Jam anchor di-detect otomatis dari entry terdini di playlist.
+        Contoh: siaran mulai jam 08:00, jam 01:30 WIB dianggap masih
+        hari siaran kemarin."""
+        anchor_hour = self._broadcast_start_hour(entries)
         now = datetime.now(WIB)
-        return now.hour * 3600 + now.minute * 60 + now.second
+        anchor_today = now.replace(
+            hour=anchor_hour, minute=0, second=0, microsecond=0
+        )
+        if now < anchor_today:
+            anchor = anchor_today - timedelta(days=1)
+        else:
+            anchor = anchor_today
+        elapsed = (now - anchor).total_seconds()
+        date_str = anchor.strftime("%Y-%m-%d")
+        return date_str, elapsed, anchor_hour
+
+    def _now_seconds(self, entries=None):
+        """Detik dalam skala timecode siaran (monoton melewati tengah malam).
+        Contoh: jam 08:00 WIB dengan anchor 08:00 → 28800."""
+        _, secs, anchor_hour = self._broadcast_date_and_seconds(entries)
+        return secs + anchor_hour * 3600
+
+    def _broadcast_date(self, entries=None):
+        date_str, _, _ = self._broadcast_date_and_seconds(entries)
+        return date_str
 
     @staticmethod
     def _find_active(entries, now_sec):
-        # Entries can be encoded with hours >= 24 for times after
-        # midnight that still belong to "today's" schedule — so a
-        # match against now_sec, or now_sec+86400 (for the "past
-        # midnight" numbering), both count.
-        for candidate in (now_sec, now_sec + 86400):
-            for e in entries:
-                if e["start"] <= candidate < e["end"]:
-                    return {**e, "elapsed": candidate - e["start"]}
+        """Cari entri yang sedang aktif. now_sec sudah monoton melewati
+        tengah malam, sehingga langsung bisa dibandingkan dengan timecode."""
+        for e in entries:
+            if e["start"] <= now_sec < e["end"]:
+                return {**e, "elapsed": now_sec - e["start"]}
         return None
 
     def _loop(self):
@@ -322,9 +385,17 @@ class PrecisionScheduler:
             if not self.enabled:
                 continue
             try:
-                today_name = datetime.now(WIB).strftime("%Y-%m-%d")
+                today_name = self._broadcast_date()  # belum ada entries, pakai fallback
                 with self._lock:
                     entries = self.playlists.get(today_name, [])
+                if not entries:
+                    # Coba deteksi ulang tanggal siaran tanpa entries (settings/default)
+                    pass
+                else:
+                    # Re-detect tanggal siaran dengan anchor dari playlist aktif
+                    today_name = self._broadcast_date(entries)
+                    with self._lock:
+                        entries = self.playlists.get(today_name, [])
                 if not entries:
                     # Tidak ada playlist hari ini — tetap putar fallback jika tersedia.
                     no_sched_key = (today_name, "no_schedule")
@@ -339,12 +410,16 @@ class PrecisionScheduler:
                         self._current_entry_key = no_sched_key
                     continue
 
-                now_sec = self._now_seconds()
+                now_sec = self._now_seconds(entries)
                 active = self._find_active(entries, now_sec)
 
                 if active is None:
-                    # Gap between scheduled entries — play fallback if available.
-                    gap_key = (today_name, "gap")
+                    # Tidak ada entry yang cocok saat ini — bisa gap di tengah
+                    # playlist atau playlist sudah selesai semuanya.
+                    # Bedakan dua kasus agar key tidak bentrok:
+                    max_end = max(e["end"] for e in entries) if entries else 0
+                    gap_reason = "end" if now_sec >= max_end else "gap"
+                    gap_key = (today_name, gap_reason)
                     if self._current_entry_key != gap_key:
                         fallback_path, _ = self._pick_fallback(0)
                         if fallback_path:
