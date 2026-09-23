@@ -250,6 +250,9 @@ class MPVController:
         idle = self._send(["get_property", "idle-active"])
         if idle.get("data") is True:
             return True
+        eof = self._send(["get_property", "eof-reached"])
+        if eof.get("data") is True:
+            return True
         path = self._send(["get_property", "path"])
         return not path.get("data")
 
