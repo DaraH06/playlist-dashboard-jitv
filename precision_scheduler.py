@@ -154,7 +154,7 @@ class PrecisionScheduler:
         self._get_fallback_fn = get_fallback_fn or (lambda: [])
         self._lock = threading.Lock()
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
-        self.enabled = False
+        self.enabled = True
         self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
         self._switch_count = 0
