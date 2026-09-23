@@ -227,21 +227,6 @@ class MPVController:
             self._send(["loadlist", M3U_PATH, "replace"])
             return self._send(["set_property", "pause", False])
 
-    def play(self):
-        return self._send(["set_property", "pause", False])
-
-    def pause(self):
-        return self._send(["set_property", "pause", True])
-
-    def stop(self):
-        return self._send(["stop"])
-
-    def next(self):
-        return self._send(["playlist-next"])
-
-    def prev(self):
-        return self._send(["playlist-prev"])
-
     def get_playlist(self):
         res = self._send(["get_property", "playlist"])
         data = res.get("data")

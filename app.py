@@ -210,37 +210,6 @@ def api_import_playlist():
 
     return jsonify({"matched": matched, "not_found": not_found})
 
-
-@app.route("/api/play", methods=["POST"])
-@login_required
-def api_play():
-    return jsonify(mpv.play())
-
-
-@app.route("/api/pause", methods=["POST"])
-@login_required
-def api_pause():
-    return jsonify(mpv.pause())
-
-
-@app.route("/api/stop", methods=["POST"])
-@login_required
-def api_stop():
-    return jsonify(mpv.stop())
-
-
-@app.route("/api/next", methods=["POST"])
-@login_required
-def api_next():
-    return jsonify(mpv.next())
-
-
-@app.route("/api/prev", methods=["POST"])
-@login_required
-def api_prev():
-    return jsonify(mpv.prev())
-
-
 @app.route("/api/status")
 @login_required
 def api_status():

@@ -54,3 +54,7 @@ schedule.json
 settings.json
 
 precision_playlists.json
+
+# testing lain
+*.playlist
+generator_playlist.py
