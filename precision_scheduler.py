@@ -39,6 +39,11 @@ try:
 except Exception:
     WIB = timezone(timedelta(hours=7))
 
+# Jam mulai siaran default. Dipakai hanya jika tidak ada playlist aktif
+# untuk auto-detect, dan tidak ada override di settings.json.
+# Nilai aman: 6 (mencakup siaran yg mulai 06:00–08:00 WIB).
+_BROADCAST_START_HOUR_DEFAULT = 6
+
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
 TICK_SECONDS = 2
 PRECISION_RESTART_EVERY = 20  # same rationale/value as simple-mode chunk_size default
@@ -149,7 +154,6 @@ class PrecisionScheduler:
         self._get_fallback_fn = get_fallback_fn or (lambda: [])
         self._lock = threading.Lock()
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
-        self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
         self._switch_count = 0
         self._fallback_index = 0  # round-robin pointer for fallback list
@@ -182,13 +186,16 @@ class PrecisionScheduler:
             self.playlists.pop(date_name, None)
             save_precision_playlists(self.playlists)
 
-    # ---------- engine control ----------
-
     def status(self):
         with self._lock:
-            today_name = datetime.now(WIB).strftime("%Y-%m-%d")
+            # Deteksi awal tanpa entries untuk dapat tanggal siaran
+            today_name = self._broadcast_date()
             today_entries = self.playlists.get(today_name, [])
-            now_sec = self._now_seconds()
+            # Re-detect dengan entries agar anchor jam akurat
+            if today_entries:
+                today_name = self._broadcast_date(today_entries)
+                today_entries = self.playlists.get(today_name, today_entries)
+            now_sec = self._now_seconds(today_entries or None)
             current = self._find_active(today_entries, now_sec) if today_entries else None
             upcoming = None
             if today_entries:
@@ -196,6 +203,7 @@ class PrecisionScheduler:
                 if future:
                     upcoming = min(future, key=lambda e: e["start"])
             return {
+                "enabled": True,
                 "today": today_name,
                 "has_schedule_today": bool(today_entries),
                 "total_entries_today": len(today_entries),
@@ -213,25 +221,17 @@ class PrecisionScheduler:
             value = PRECISION_RESTART_EVERY
         return max(1, value)
 
-    def _pick_fallback(self, elapsed_in_slot):
-        """Pilih fallback video secara round-robin dan hitung posisi seek
-        supaya video fallback seolah berjalan kontinu selama slot berlangsung.
-        Return (full_path, seek_sec) atau (None, 0) jika tidak ada."""
+    def _pick_fallback(self, elapsed_in_slot=0):
+        """Pilih fallback video secara round-robin.
+        - 1 video  -> loop=True (putar terus)
+        - 2+ video -> loop=False (bergantian round-robin setiap video selesai)
+        Return (full_path, should_loop) atau (None, False) jika tidak ada."""
         fallbacks = self._get_fallback_fn()
         if not fallbacks:
-            return None, 0
-
-        # Tentukan index video fallback berdasarkan elapsed, bukan state global,
-        # supaya setelah restart mpv posisi bisa dihitung ulang dari jam tayang.
-        # Strategy: get_duration tidak tersedia tanpa media info, jadi kita pakai
-        # round-robin index saja yang reset saat entry baru.
+            return None, False
+        should_loop = (len(fallbacks) == 1)
         path = fallbacks[self._fallback_index % len(fallbacks)]
-        # Seek ke posisi elapsed % durasi video tidak bisa tanpa tahu durasi,
-        # jadi kita seek 0 (awal) — engine akan re-enter setiap TICK_SECONDS
-        # dan key tidak berubah (sama entry), jadi tidak akan putar ulang terus.
-        # Untuk loop dalam satu slot: kita deteksi via mpv idle lalu lanjut.
-        # Simpel dan aman: putar dari awal, biarkan engine mpv loop sendiri.
-        return path, 0
+        return path, should_loop
 
     def timeline(self, played_limit=5, upcoming_limit=15):
         """Daftar 'sudah diputar / sedang diputar / berikutnya' untuk
@@ -242,19 +242,20 @@ class PrecisionScheduler:
         yang berguna — daftar itu harus diturunkan dari jadwal
         presisi hari ini, bukan dari mpv."""
         with self._lock:
-            today_name = datetime.now(WIB).strftime("%Y-%m-%d")
+            today_name = self._broadcast_date()  # deteksi awal
             entries = list(self.playlists.get(today_name, []))
-        now_sec = self._now_seconds()
+            if entries:
+                today_name = self._broadcast_date(entries)  # re-detect dengan anchor akurat
+                entries = list(self.playlists.get(today_name, entries))
+        now_sec = self._now_seconds(entries or None)
 
         played, playing, upcoming = [], [], []
         for e in entries:
-            # Entri dgn start >= 24 jam = waktu setelah tengah malam yg
-            # masih milik jadwal hari ini (lihat timecode_to_seconds) —
-            # bandingkan ke "now + 24 jam" biar masuk kelompok yg benar.
-            now_cmp = now_sec + 86400 if e["start"] >= 86400 else now_sec
+            # now_sec sudah dalam skala timecode broadcast (monoton melewati
+            # tengah malam), jadi tidak perlu koreksi +86400 lagi.
+            now_cmp = now_sec
 
             if e["type"] == "video":
-
                 label = e["label"]
             elif e["type"] == "live":
                 fallbacks = self._get_fallback_fn()
@@ -292,56 +293,124 @@ class PrecisionScheduler:
 
     # ---------- engine internals ----------
 
-    @staticmethod
-    def _now_seconds():
+    def _broadcast_start_hour(self, entries=None):
+        """Tentukan jam anchor siaran secara otomatis.
+        Prioritas:
+          1. Entry paling awal di playlist aktif (auto-detect).
+          2. settings.json key 'broadcast_start_hour'.
+          3. _BROADCAST_START_HOUR_DEFAULT (6).
+        """
+        # 1. Auto-detect dari playlist
+        if entries:
+            min_start = min(e["start"] for e in entries)
+            # min_start dalam detik timecode, misal 28800 = 08:00
+            # Ambil jam-nya (floor), pastikan dalam rentang wajar 0–12
+            detected = int(min_start // 3600)
+            if 0 <= detected <= 12:
+                return detected
+
+        # 2. Dari settings.json
+        try:
+            settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
+            with open(settings_path) as f:
+                val = json.load(f).get("broadcast_start_hour")
+            if val is not None:
+                return int(val)
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+        # 3. Default
+        return _BROADCAST_START_HOUR_DEFAULT
+
+    def _broadcast_date_and_seconds(self, entries=None):
+        """Kembalikan (date_str, broadcast_seconds) di mana broadcast_seconds
+        adalah jumlah detik sejak anchor siaran pada tanggal siaran.
+        Jam anchor di-detect otomatis dari entry terdini di playlist.
+        Contoh: siaran mulai jam 08:00, jam 01:30 WIB dianggap masih
+        hari siaran kemarin."""
+        anchor_hour = self._broadcast_start_hour(entries)
         now = datetime.now(WIB)
-        return now.hour * 3600 + now.minute * 60 + now.second
+        anchor_today = now.replace(
+            hour=anchor_hour, minute=0, second=0, microsecond=0
+        )
+        if now < anchor_today:
+            anchor = anchor_today - timedelta(days=1)
+        else:
+            anchor = anchor_today
+        elapsed = (now - anchor).total_seconds()
+        date_str = anchor.strftime("%Y-%m-%d")
+        return date_str, elapsed, anchor_hour
+
+    def _now_seconds(self, entries=None):
+        """Detik dalam skala timecode siaran (monoton melewati tengah malam).
+        Contoh: jam 08:00 WIB dengan anchor 08:00 → 28800."""
+        _, secs, anchor_hour = self._broadcast_date_and_seconds(entries)
+        return secs + anchor_hour * 3600
+
+    def _broadcast_date(self, entries=None):
+        date_str, _, _ = self._broadcast_date_and_seconds(entries)
+        return date_str
 
     @staticmethod
     def _find_active(entries, now_sec):
-        # Entries can be encoded with hours >= 24 for times after
-        # midnight that still belong to "today's" schedule — so a
-        # match against now_sec, or now_sec+86400 (for the "past
-        # midnight" numbering), both count.
-        for candidate in (now_sec, now_sec + 86400):
-            for e in entries:
-                if e["start"] <= candidate < e["end"]:
-                    return {**e, "elapsed": candidate - e["start"]}
+        """Cari entri yang sedang aktif. now_sec sudah monoton melewati
+        tengah malam, sehingga langsung bisa dibandingkan dengan timecode."""
+        for e in entries:
+            if e["start"] <= now_sec < e["end"]:
+                return {**e, "elapsed": now_sec - e["start"]}
         return None
 
     def _loop(self):
         while True:
             time.sleep(TICK_SECONDS)
             try:
-                today_name = datetime.now(WIB).strftime("%Y-%m-%d")
+                today_name = self._broadcast_date()  # deteksi awal tanpa entries
                 with self._lock:
                     entries = self.playlists.get(today_name, [])
+                if entries:
+                    # Re-detect tanggal siaran dengan anchor dari playlist aktif
+                    today_name = self._broadcast_date(entries)
+                    with self._lock:
+                        entries = self.playlists.get(today_name, [])
                 if not entries:
                     # Tidak ada playlist hari ini — tetap putar fallback jika tersedia.
-                    no_sched_key = (today_name, "no_schedule")
+                    fallback_path, should_loop = self._pick_fallback(0)
+                    no_sched_key = (today_name, "no_schedule", fallback_path, self._fallback_index)
+
+                    if self._current_entry_key == no_sched_key and self.controller.is_idle() and not should_loop:
+                        self._fallback_index += 1
+                        fallback_path, should_loop = self._pick_fallback(0)
+                        no_sched_key = (today_name, "no_schedule", fallback_path, self._fallback_index)
+
                     if self._current_entry_key != no_sched_key:
-                        fallback_path, _ = self._pick_fallback(0)
                         if fallback_path:
-                            self.controller.load_file_and_seek(fallback_path, 0, loop=True)
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=should_loop)
                             self._switch_count += 1
-                            self._fallback_index += 1
                         else:
                             self.controller.show_blank()
                         self._current_entry_key = no_sched_key
                     continue
 
-                now_sec = self._now_seconds()
+                now_sec = self._now_seconds(entries)
                 active = self._find_active(entries, now_sec)
 
                 if active is None:
-                    # Gap between scheduled entries — play fallback if available.
-                    gap_key = (today_name, "gap")
+                    # Tidak ada entry yang cocok saat ini — bisa gap di tengah
+                    # playlist atau playlist sudah selesai semuanya.
+                    max_end = max(e["end"] for e in entries) if entries else 0
+                    gap_reason = "end" if now_sec >= max_end else "gap"
+                    fallback_path, should_loop = self._pick_fallback(0)
+                    gap_key = (today_name, gap_reason, fallback_path, self._fallback_index)
+
+                    if self._current_entry_key == gap_key and self.controller.is_idle() and not should_loop:
+                        self._fallback_index += 1
+                        fallback_path, should_loop = self._pick_fallback(0)
+                        gap_key = (today_name, gap_reason, fallback_path, self._fallback_index)
+
                     if self._current_entry_key != gap_key:
-                        fallback_path, _ = self._pick_fallback(0)
                         if fallback_path:
-                            self.controller.load_file_and_seek(fallback_path, 0, loop=True)
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=should_loop)
                             self._switch_count += 1
-                            self._fallback_index += 1
                         else:
                             self.controller.show_blank()
                         self._current_entry_key = gap_key
@@ -355,18 +424,25 @@ class PrecisionScheduler:
                     full = os.path.join(self.video_root, active["path"])
                     self.controller.load_file_and_seek(full, float(active["elapsed"]))
                     self._switch_count += 1
+                    self._current_entry_key = key
                 else:
                     # live segment, missing file, or gap:
                     # try to play a fallback video instead of showing blank.
-                    fallback_path, _ = self._pick_fallback(active["elapsed"])
-                    if fallback_path:
-                        self.controller.load_file_and_seek(fallback_path, 0, loop=True)
-                        self._switch_count += 1
-                        self._fallback_index += 1
-                    else:
-                        self.controller.show_blank()
+                    fallback_path, should_loop = self._pick_fallback(active["elapsed"])
+                    live_key = (today_name, active["start"], fallback_path, self._fallback_index)
 
-                self._current_entry_key = key
+                    if self._current_entry_key == live_key and self.controller.is_idle() and not should_loop:
+                        self._fallback_index += 1
+                        fallback_path, should_loop = self._pick_fallback(active["elapsed"])
+                        live_key = (today_name, active["start"], fallback_path, self._fallback_index)
+
+                    if self._current_entry_key != live_key:
+                        if fallback_path:
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=should_loop)
+                            self._switch_count += 1
+                        else:
+                            self.controller.show_blank()
+                        self._current_entry_key = live_key
 
                 if self._switch_count >= self._restart_every():
                     self.controller.restart_process_only()
