@@ -176,7 +176,7 @@ class MPVController:
             "--cache=yes",
             "--demuxer-max-bytes=100M",
             "--demuxer-max-back-bytes=50M",
-            "--loop-playlist=inf",
+            "--loop-playlist=no",
             "--no-terminal",
             "--really-quiet",
         ]
@@ -221,6 +221,7 @@ class MPVController:
                     f.write(p + "\n")
             self._chunk_progress = 0
             self._last_seen_pos = None
+            self._send(["set_property", "loop-playlist", "inf"])
             self._send(["loadlist", M3U_PATH, "replace"])
             return self._send(["set_property", "pause", False])
 
@@ -254,7 +255,14 @@ class MPVController:
         if eof.get("data") is True:
             return True
         path = self._send(["get_property", "path"])
-        return not path.get("data")
+        if not path.get("data"):
+            return True
+        time_pos = self._send(["get_property", "time-pos"]).get("data")
+        duration = self._send(["get_property", "duration"]).get("data")
+        if time_pos is not None and duration is not None and duration > 0:
+            if time_pos >= duration - 0.5:
+                return True
+        return False
 
     def status(self):
         if not self.is_running():
@@ -373,6 +381,7 @@ class MPVController:
         if seek_seconds and seek_seconds > 0:
             self._send(["seek", seek_seconds, "absolute"])
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
+        self._send(["set_property", "loop-playlist", "inf" if loop else "no"])
         self._send(["set_property", "pause", False])
 
     def show_blank(self):
