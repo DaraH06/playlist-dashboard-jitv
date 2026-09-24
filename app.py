@@ -5,7 +5,7 @@ import io
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
-from mpv_controller import MPVController, MockMPVController, make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
+from mpv_controller import make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
 from precision_scheduler import PrecisionScheduler, parse_playlist_text
 
 app = Flask(__name__)
