@@ -383,7 +383,7 @@ class MPVController:
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
         self._send(["set_property", "loop-playlist", "inf" if loop else "no"])
         if seek_seconds and seek_seconds > 0:
-            time.sleep(0.1)
+            time.sleep(0.3)
             self._send(["seek", seek_seconds, "absolute"])
         self._send(["set_property", "pause", False])
 
