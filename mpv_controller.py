@@ -209,8 +209,6 @@ class MPVController:
             return json.loads(first_line)
         except (OSError, json.JSONDecodeError) as e:
             return {"error": str(e)}
-        finally:
-            s.close()
 
     # ---------- playlist control ----------
 
@@ -373,7 +371,7 @@ class MPVController:
             time.sleep(0.1)
         return False
 
-    def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
+    def load_file_and_seek(self, full_path, seek_seconds=0, loop=False, duration=None):
         """Load a single file directly (not via mpv's playlist feature)
         and jump to the given position. Used by the precision scheduler
         to start a video exactly where it should be right now, instead
@@ -382,10 +380,10 @@ class MPVController:
         if not self.is_running():
             self.start()
             time.sleep(1)
-            
+
         # Keep the new file paused while mpv opens its demuxer.  Without
         # this, mpv can begin at 0:00 before the scheduled seek is handled.
-        self._send(["loadfile", full_path, "replace", {"pause": True}])
+        self._send(["loadfile", full_path, "replace"])
         self._wait_for_file_loaded(full_path)
         if seek_seconds and seek_seconds > 0:
             # The first seek can still race mpv's demuxer on a slow network
@@ -421,13 +419,6 @@ class MPVController:
         self._watcher_started = True
         t = threading.Thread(target=self._watch_loop, daemon=True)
         t.start()
-
-
-# ---------------------------------------------------------------------------
-# Mock controller — dipakai otomatis di Windows (atau jika env var
-# DASHBOARD_MOCK=1 di-set).  Public API identik dengan MPVController
-# sehingga app.py tidak perlu berubah sama sekali saat di-deploy ke Pi.
-# ---------------------------------------------------------------------------
 
 class MockMPVController:
     """Simulasi in-memory MPVController untuk development lokal di Windows.

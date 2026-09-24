@@ -12,12 +12,12 @@ Environment=DASHBOARD_PASSWORD_HASH=REPLACE_WITH_GENERATED_HASH
 Environment=DASHBOARD_SECRET_KEY=REPLACE_WITH_RANDOM_STRING
 Environment=DASHBOARD_VIDEO_ROOT=/mnt/videoserver
 Environment=DASHBOARD_CHUNK_SIZE=20
-Environment=DASHBOARD_PLAYER=ffmpeg
+Environment=DASHBOARD_PLAYER=mpv
 Environment=DASHBOARD_ENCODER=h264_v4l2m2m
 Environment=DASHBOARD_FPS=25
+Environment=DASHBOARD_RTMP_URL=rtmp://jitv:jitv@103.255.15.138:1935/live/demo
 # DASHBOARD_RTMP_URL diset terpisah — JANGAN tulis URL/stream key di sini.
 # Simpan di file override: sudo systemctl edit raspi-dashboard
-# lalu tambahkan: Environment=DASHBOARD_RTMP_URL=rtmp://...
 ExecStart=/home/eksan/raspi-dashboard/venv/bin/python3 /home/eksan/raspi-dashboard/app.py
 Restart=on-failure
 RestartSec=3
