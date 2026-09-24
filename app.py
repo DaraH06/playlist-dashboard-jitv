@@ -5,7 +5,7 @@ import io
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
-from mpv_controller import MPVController, MockMPVController, make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
+from mpv_controller import make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
 from precision_scheduler import PrecisionScheduler, parse_playlist_text
 
 app = Flask(__name__)
@@ -209,37 +209,6 @@ def api_import_playlist():
             not_found.append(line)
 
     return jsonify({"matched": matched, "not_found": not_found})
-
-
-@app.route("/api/play", methods=["POST"])
-@login_required
-def api_play():
-    return jsonify(mpv.play())
-
-
-@app.route("/api/pause", methods=["POST"])
-@login_required
-def api_pause():
-    return jsonify(mpv.pause())
-
-
-@app.route("/api/stop", methods=["POST"])
-@login_required
-def api_stop():
-    return jsonify(mpv.stop())
-
-
-@app.route("/api/next", methods=["POST"])
-@login_required
-def api_next():
-    return jsonify(mpv.next())
-
-
-@app.route("/api/prev", methods=["POST"])
-@login_required
-def api_prev():
-    return jsonify(mpv.prev())
-
 
 @app.route("/api/status")
 @login_required

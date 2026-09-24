@@ -45,7 +45,7 @@ except Exception:
 _BROADCAST_START_HOUR_DEFAULT = 6
 
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
-TICK_SECONDS = 1
+TICK_SECONDS = 2
 PRECISION_RESTART_EVERY = 20  # same rationale/value as simple-mode chunk_size default
 
 TIMECODE_RE = re.compile(r"^(\d+):(\d{2}):(\d{2}):(\d{2})$")
@@ -154,6 +154,7 @@ class PrecisionScheduler:
         self._get_fallback_fn = get_fallback_fn or (lambda: [])
         self._lock = threading.Lock()
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
+        self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
         self._switch_count = 0
         self._fallback_index = 0  # round-robin pointer for fallback list
@@ -186,6 +187,8 @@ class PrecisionScheduler:
             self.playlists.pop(date_name, None)
             save_precision_playlists(self.playlists)
 
+    # ---------- engine control ----------
+
     def status(self):
         with self._lock:
             # Deteksi awal tanpa entries untuk dapat tanggal siaran
@@ -203,7 +206,6 @@ class PrecisionScheduler:
                 if future:
                     upcoming = min(future, key=lambda e: e["start"])
             return {
-                "enabled": True,
                 "today": today_name,
                 "has_schedule_today": bool(today_entries),
                 "total_entries_today": len(today_entries),
@@ -415,37 +417,40 @@ class PrecisionScheduler:
                     continue
 
                 key = (today_name, active["start"])
-                if key == self._current_entry_key and self.controller.is_running():
-                    continue  # already playing the right thing
 
-                if active["type"] == "video":
-                    full = os.path.join(self.video_root, active["path"])
-                    self.controller.load_file_and_seek(full, float(active["elapsed"]))
-                    self._switch_count += 1
-                    self._current_entry_key = key
-                else:
-                    # live segment, missing file, or gap:
-                    # try to play a fallback video instead of showing blank.
-                    fallback_path = self._pick_fallback(active["elapsed"])
-                    live_key = (today_name, active["start"], fallback_path, self._fallback_index)
+                should_switch = False
+                if key != self._current_entry_key:
+                    should_switch = True
+                elif not self.controller.is_running():
+                    should_switch = True
+                if should_switch:
+                    current_duration = active['duration']
 
-                    if self._current_entry_key == live_key and self.controller.is_idle():
-                        self._fallback_index += 1
-                        fallback_path = self._pick_fallback(active["elapsed"])
-                        live_key = (today_name, active["start"], fallback_path, self._fallback_index)
-
-                    if self._current_entry_key != live_key:
+                    if active["type"] == "video":
+                        full = os.path.join(self.video_root, active["path"])
+                        self.controller.load_file_and_seek(
+                            full,
+                            float(active["elapsed"]),
+                            duration=current_duration,
+                        )
+                        self._switch_count += 1
+                    else:
+                        # live segment, missing file, or gap:
+                        # try to play a fallback video instead of showing blank.
+                        fallback_path, _ = self._pick_fallback(active["elapsed"])
                         if fallback_path:
-                            self.controller.load_file_and_seek(fallback_path, 0, loop=False)
+                            self.controller.load_file_and_seek(fallback_path, 0, loop=True)
                             self._switch_count += 1
+                            self._fallback_index += 1
                         else:
                             self.controller.show_blank()
-                        self._current_entry_key = live_key
 
-                if self._switch_count >= self._restart_every():
-                    self.controller.restart_process_only()
-                    self._switch_count = 0
-                    self._current_entry_key = None  # force reload next tick
+                    self._current_entry_key = key
+
+                    if self._switch_count >= self._restart_every():
+                        self.controller.restart_process_only()
+                        self._switch_count = 0
+                        self._current_entry_key = None  # force reload next tick
             except Exception:
                 # Never let the engine thread die silently.
                 pass

@@ -50,7 +50,17 @@ run_local.ps1
 playlists.json
 playlist.json
 schedule.json
-
 settings.json
-
 precision_playlists.json
+
+# testing lain
+generator_playlist.py
+generate_playlist.py
+
+# Development markdown
+*.md
+!README.md
+!HANDOVER.md
+
+# Generated playlist files
+*.playlist

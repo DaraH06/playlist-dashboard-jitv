@@ -89,6 +89,44 @@ python3 app.py
 
 Buka `http://<ip-pi>:5000` dari device yang satu jaringan dengan Pi.
 
+## Uji playlist presisi dari video lokal
+
+Generator [generate_playlist.py](generate_playlist.py) membuat file
+`.playlist` berdasarkan durasi riil video yang dibaca oleh `ffprobe`.
+Install FFmpeg di komputer pengujian dan pastikan `ffprobe` tersedia di
+`PATH`, lalu jalankan:
+
+```powershell
+python generate_playlist.py `
+  --video-dir "D:\TestVideo" `
+  --start-time "06:00:00" `
+  --date "2026-09-23" `
+  --output "2026-09-23.playlist"
+```
+
+Set `DASHBOARD_VIDEO_ROOT` ke folder yang sama sebelum menjalankan
+dashboard lokal. Import file `.playlist` melalui panel Mode Presisi.
+Nama/path relatif dalam file playlist harus berada di bawah root tersebut.
+
+Untuk tahap awal, uji dulu bahwa scheduler memuat video dan melakukan
+seek ke posisi sesuai jam dinding. MediaMTX/RTMP merupakan tahap terpisah:
+dashboard ini tidak mengirim output RTMP secara langsung. Setelah playback
+lokal terbukti benar, gunakan FFmpeg atau encoder yang terpisah untuk
+mengirim output ke endpoint MediaMTX, misalnya:
+
+```text
+rtmp://127.0.0.1:1935/live/test
+```
+
+URL playback MediaMTX biasanya:
+
+```text
+http://127.0.0.1:8889/live/test
+```
+
+Untuk produksi, ganti endpoint tersebut dengan URL RTMP server tujuan tanpa
+mengubah format file `.playlist`.
+
 ## Jalan otomatis setelah reboot (disarankan)
 
 Edit `raspi-dashboard.service`:
