@@ -436,7 +436,7 @@ class MockMPVController:
         self.chunk_size = load_chunk_size()
         self._lock = threading.Lock()
         self._running = False
-        self._paused  = True
+        self._paused  = False
         self._playlist = []      # list of full path strings
         self._index    = None    # current playlist index
         self._time_pos = 0.0     # detik saat ini di video
@@ -492,41 +492,6 @@ class MockMPVController:
             self._duration      = 120.0  # tiruan 2 menit per video
             self._paused        = False
             self._chunk_progress = 0
-        return {"error": None}
-
-    def play(self):
-        with self._lock:
-            self._paused = False
-        return {"error": None}
-
-    def pause(self):
-        with self._lock:
-            self._paused = True
-        return {"error": None}
-
-    def stop(self):
-        with self._lock:
-            self._index    = None
-            self._time_pos = 0.0
-            self._duration = 0.0
-            self._paused   = True
-        return {"error": None}
-
-    def next(self):
-        with self._lock:
-            if self._index is not None and self._index + 1 < len(self._playlist):
-                self._index   += 1
-                self._time_pos = 0.0
-                self._duration = 120.0
-                self._chunk_progress += 1
-        return {"error": None}
-
-    def prev(self):
-        with self._lock:
-            if self._index is not None and self._index > 0:
-                self._index   -= 1
-                self._time_pos = 0.0
-                self._duration = 120.0
         return {"error": None}
 
     def get_playlist(self):
