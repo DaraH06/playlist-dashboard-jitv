@@ -386,6 +386,8 @@ class MPVController:
         self._send(["loadfile", full_path, "replace"])
         self._wait_for_file_loaded(full_path)
         if seek_seconds and seek_seconds > 0:
+            time.sleep(0.3)
+            self._send(["seek", seek_seconds, "absolute"])
             # The first seek can still race mpv's demuxer on a slow network
             # mount.  Retry briefly until mpv reports the requested position.
             for _ in range(3):
