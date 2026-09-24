@@ -426,18 +426,6 @@ document.getElementById("btn-import-zip").onclick = async () => {
   loadNamedPlaylists();
 };
 
-
-
-// ---------- Wire up controls ----------
-
-document.getElementById("btn-play").onclick = () => api("/api/play", { method: "POST" }).then(pollStatus);
-document.getElementById("btn-pause").onclick = () => api("/api/pause", { method: "POST" }).then(pollStatus);
-document.getElementById("btn-stop").onclick = () => api("/api/stop", { method: "POST" }).then(pollStatus);
-document.getElementById("btn-next").onclick = () => api("/api/next", { method: "POST" }).then(pollStatus);
-document.getElementById("btn-prev").onclick = () => api("/api/prev", { method: "POST" }).then(pollStatus);
-
-
-
 // ---------- Mode Jadwal Presisi ----------
 
 function formatClock(totalSeconds) {
