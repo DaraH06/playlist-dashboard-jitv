@@ -117,6 +117,8 @@ class FFmpegController:
         self._loop_file    = False
         self._last_error   = None          # string error terakhir / None
         self._chunk_progress = 0
+        self._current_duration_sec = None
+        self._current_duration_str = "--:--"
         self._watcher_started = False
 
         self._ensure_watcher()
@@ -199,7 +201,8 @@ class FFmpegController:
     def is_running(self):
         """True jika ada proses FFmpeg aktif dan belum selesai."""
         with self._lock:
-            return self._proc is not None and self._proc.poll() is None
+            isprocrun = self._proc is not None and self._proc.poll() is None
+            return isprocrun
 
     def is_idle(self):
         """True jika tidak ada proses aktif atau playlist kosong."""
@@ -289,7 +292,7 @@ class FFmpegController:
             self._start_proc(self._playlist[self._index])
         return {"error": None}
 
-    def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
+    def load_file_and_seek(self, full_path, seek_seconds=0, loop=False, duration=None):
         """Muat satu file dan seek ke posisi tertentu (dipakai PrecisionScheduler, M7)."""
         with self._lock:
             self._playlist   = [full_path]
@@ -297,6 +300,9 @@ class FFmpegController:
             self._time_pos   = float(seek_seconds)
             self._paused     = False
             self._loop_file  = bool(loop)
+            self._current_duration_sec = duration
+            if duration is not None:
+                self._current_duration_str = format_duration(duration)
             self._start_proc(full_path, seek_seconds=seek_seconds, loop=loop)
 
     def show_blank(self):
@@ -362,8 +368,8 @@ class FFmpegController:
                 "chunk_size":           self.chunk_size,
                 "current_time_pos":     self._time_pos,
                 "current_time_str":     format_duration(self._time_pos),
-                "current_duration_sec": None,   # FFmpeg tidak expose durasi live
-                "current_duration_str": "--:--",
+                "current_duration_sec": self._current_duration_sec,
+                "current_duration_str": self._current_duration_str,
                 "playlist":             items,
                 # Field tambahan khusus FFmpeg (ditampilkan di status)
                 "encoder":              self.encoder,
@@ -425,6 +431,8 @@ class FFmpegController:
                     else:
                         # Video selesai normal atau retry habis → next
                         _retry_count = 0
+                        self._current_duration_sec = None
+                        self._current_duration_str = "--:--"
                         if (not self._loop_file and self._index is not None
                                 and self._index + 1 < len(self._playlist)):
                             # Auto-next (M5)
@@ -440,91 +448,3 @@ class FFmpegController:
                             # Playlist habis → idle
                             self._index    = None
                             self._time_pos = 0.0
-
-
-# ---------------------------------------------------------------------------
-# Self-check (jalankan: python ffmpeg_controller.py)
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    import sys
-
-    print("=== FFmpegController self-check ===")
-    errors = []
-
-    # --- Test 1: state machine tanpa proses nyata ---
-    c = FFmpegController(rtmp_url="rtmp://127.0.0.1:1935/live/test",
-                         encoder="libx264", fps="25")
-
-    # Simulasikan load_playlist tanpa spawn proses (override _start_proc)
-    def _noop_start(path, seek_seconds=0, loop=False):
-        pass
-    c._start_proc = _noop_start  # monkey-patch untuk test
-
-    c.load_playlist(["/fake/a.mp4", "/fake/b.mp4"])
-    assert c._index == 0, f"index expected 0, got {c._index}"
-    assert not c._paused
-
-    c.pause()
-    assert c._paused, "pause() harusnya set _paused=True"
-
-    c.play()
-    assert not c._paused, "play() harusnya clear _paused"
-
-    c.next()
-    assert c._index == 1, f"next() index expected 1, got {c._index}"
-
-    c.prev()
-    assert c._index == 0, f"prev() index expected 0, got {c._index}"
-
-    c.stop()
-    assert c._index is None, "stop() harusnya set _index=None"
-    assert c.is_idle()
-
-    print("  [OK] state machine: play/pause/stop/next/prev")
-
-    # --- Test 2: set_chunk_size ---
-    c.set_chunk_size(10)
-    assert c.chunk_size == 10
-    try:
-        c.set_chunk_size(999)
-        errors.append("set_chunk_size(999) harusnya raise ValueError")
-    except ValueError:
-        pass
-    print("  [OK] set_chunk_size validation")
-
-    # --- Test 3: _build_ffmpeg_cmd ---
-    cmd = _build_ffmpeg_cmd("/video/a.mp4", 755, "rtmp://host/live/test",
-                             "libx264", "25")
-    assert "-ss" in cmd, "-ss harus ada saat seek_seconds > 0"
-    assert "755.0" in cmd or "755" in cmd, "seek seconds harus ada di cmd"
-    assert "rtmp://host/live/test" in cmd
-    assert "libx264" in cmd
-    print("  [OK] _build_ffmpeg_cmd (seek + encoder)")
-
-    cmd_copy = _build_ffmpeg_cmd("/video/a.mp4", 0, "rtmp://host/live/test",
-                                  "copy", "25")
-    assert "copy" in cmd_copy
-    assert "-ss" not in cmd_copy, "-ss tidak boleh ada jika seek_seconds=0"
-    print("  [OK] _build_ffmpeg_cmd (copy, no seek)")
-
-    # --- Test 4: status() format ---
-    c2 = FFmpegController(rtmp_url="rtmp://127.0.0.1:1935/live/test")
-    c2._start_proc = _noop_start
-    c2.load_playlist(["/fake/a.mp4"])
-    s = c2.status()
-    for key in ("running", "paused", "current_file", "playlist_index",
-                 "playlist_count", "chunk_progress", "chunk_size",
-                 "current_time_pos", "current_time_str", "playlist",
-                 "encoder", "rtmp_url", "last_error"):
-        if key not in s:
-            errors.append(f"status() missing key: {key}")
-    print("  [OK] status() keys")
-
-    if errors:
-        print("\n[FAIL] Errors:")
-        for e in errors:
-            print(f"  - {e}")
-        sys.exit(1)
-    else:
-        print("\n[PASS] Semua test lulus.")

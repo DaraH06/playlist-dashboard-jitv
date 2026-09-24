@@ -55,7 +55,7 @@ precision_playlists.json
 
 # testing lain
 generator_playlist.py
-generated_playlists.py
+generate_playlist.py
 
 # Development markdown
 *.md
