@@ -57,17 +57,23 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
     seek_seconds > 0 → pakai -ss (input seeking, cepat untuk format yang support it).
     loop=True        → pakai -stream_loop -1 (fallback video mengulang terus).
     """
+    is_stream = input_path.startswith(("rtmp://", "srt://", "http://", "https://"))
+  
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
 
-    if loop:
+    if loop and not is_stream:
         cmd += ["-stream_loop", "-1"]
 
-    if seek_seconds and seek_seconds > 0:
+    if not is_stream and seek_seconds and seek_seconds > 0:
         # Input seeking (-ss sebelum -i) jauh lebih cepat daripada output seeking,
         # dan cukup akurat untuk keperluan precision mode (toleransi ~1 detik).
         cmd += ["-ss", str(float(seek_seconds))]
 
-    cmd += ["-re", "-i", input_path]
+    if is_stream:
+        cmd += ["-fflags", "nobuffer", "-flags", "low_delay"]
+        cmd += ["-i", input_path]
+    else:
+        cmd += ["-re", "-i", input_path]
 
     # Video encode / copy
     if encoder == "copy":
