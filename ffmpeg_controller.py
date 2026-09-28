@@ -26,7 +26,7 @@ import os
 import subprocess
 import threading
 import time
-
+from datetime import datetime
 # ---------------------------------------------------------------------------
 # Konstanta / env
 # ---------------------------------------------------------------------------
@@ -73,7 +73,11 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
         cmd += ["-fflags", "nobuffer", "-flags", "low_delay"]
         cmd += ["-i", input_path]
     else:
-        cmd += ["-re", "-i", input_path]
+        cmd += [
+            "-readrate", "1.0",
+            "-readrate_initial_burst", "5.0",
+            "-i", input_path
+            ]
 
     # Video encode / copy
     if encoder == "copy":
@@ -187,6 +191,7 @@ class FFmpegController:
         self._last_error = None
         # Baca stderr di thread terpisah agar tidak blocking.
         proc_ref = self._proc
+
         def _read_stderr():
             lines = []
             try:
@@ -409,6 +414,9 @@ class FFmpegController:
             elapsed = now - _last_tick
             _last_tick = now
 
+            action = None
+            exit_code = None
+
             with self._lock:
                 proc_alive = self._proc is not None and self._proc.poll() is None
 
@@ -424,16 +432,18 @@ class FFmpegController:
                     rtmp_error = (exit_code not in (0, None) and
                                   self._last_error and
                                   "rtmp" in (self._last_error or "").lower())
+                    
+                    with open("ffmpeg_log.txt", "a") as f:
+                            f.write(f"{datetime.now()}: DEBUG: FFmpeg process finished. Exit code: {exit_code}, Last error: {self._last_error}, Retrying RTMP: {rtmp_error}")
+
 
                     if rtmp_error and _retry_count < _MAX_RETRIES:
                         # RTMP disconnect/error → retry (M9)
                         _retry_count += 1
-                        time.sleep(_RETRY_INTERVAL)
-                        if (not self._paused and self._index is not None
-                                and self._playlist):
-                            self._start_proc(self._playlist[self._index],
-                                             seek_seconds=self._time_pos,
-                                             loop=self._loop_file)
+                        action = ("retry",)
+                        
+                        with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: RTMP error, retry {_retry_count}. Exit code: {exit_code}. Error: {self._last_error}\n")
                     else:
                         # Video selesai normal atau retry habis → next
                         _retry_count = 0
@@ -442,15 +452,43 @@ class FFmpegController:
                         if (not self._loop_file and self._index is not None
                                 and self._index + 1 < len(self._playlist)):
                             # Auto-next (M5)
-                            self._index    += 1
-                            self._time_pos  = 0.0
-                            self._chunk_progress += 1
-                            self._start_proc(self._playlist[self._index])
+                            action = ("next",)
+                            with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: Video finished. Moving to next. Exit code: {exit_code}\n")
                         elif self._loop_file and self._index is not None and self._playlist:
                             # Loop file selesai → restart dari 0
-                            self._time_pos = 0.0
-                            self._start_proc(self._playlist[self._index], loop=True)
+                            action = ("loop",)
+                            with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: Looping file finished. Restarting. Exit code: {exit_code}\n")
                         else:
                             # Playlist habis → idle
-                            self._index    = None
-                            self._time_pos = 0.0
+                            action = ("idle",)
+                            with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: Playlist ended. Going idle. Exit code: {exit_code}\n")
+
+            if action and action[0] == "retry":
+                time.sleep(_RETRY_INTERVAL)
+                with self._lock:
+                    if (not self._paused and self._index is not None and self._playlist):
+                        self._start_proc(self._playlist[self._index],
+                                             seek_seconds=self._time_pos,
+                                             loop=self._loop_file)
+
+            elif action and action[0] == "next":
+                with self._lock:
+                    if (self._index is not None and self._index + 1 < len(self._playlist)):
+                        self._index += 1
+                        self._time_pos = 0.0
+                        self._chunk_progress += 1
+                        self._start_proc(self._playlist[self._index])
+
+            elif action and action[0] == "loop":
+                with self._lock:
+                    if self._index is not None and self._playlist:
+                        self._time_pos = 0.0
+                        self._start_proc(self._playlist[self._index], loop=True)
+
+            elif action and action[0] == "idle":
+                with self._lock:
+                    self._index = None
+                    self._time_pos = 0.0
