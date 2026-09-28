@@ -47,7 +47,7 @@ _BROADCAST_START_HOUR_DEFAULT = 6
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
 TICK_SECONDS = 2
 PRECISION_RESTART_EVERY = 20  # same rationale/value as simple-mode chunk_size default
-
+CCTV_LIVE = os.environ.get("CCTV_RTMP", "rtmp://172.16.16.222:1935/live/livecctv")
 TIMECODE_RE = re.compile(r"^(\d+):(\d{2}):(\d{2}):(\d{2})$")
 
 
@@ -87,7 +87,7 @@ def parse_playlist_text(text, video_root, safe_path_fn, filename_index):
         if content.lower().startswith("srt://"):
             entries.append({
                 "start": start, "duration": duration, "end": start + duration,
-                "type": "live", "path": None, "label": content,
+                "type": "live", "path": None, "label": CCTV_LIVE,
             })
             continue
 
@@ -432,6 +432,16 @@ class PrecisionScheduler:
                             full,
                             float(active["elapsed"]),
                             duration=current_duration,
+                        )
+                        self._switch_count += 1
+                    elif active["type"] == "live":
+                        stream_url = active["label"] 
+                        print(f"PrecisionScheduler: Switching to LIVE stream: {stream_url}")
+                        
+                        self.controller.load_file_and_seek(
+                            stream_url, 
+                            0, 
+                            duration=current_duration
                         )
                         self._switch_count += 1
                     else:
