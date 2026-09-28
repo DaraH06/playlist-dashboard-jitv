@@ -34,6 +34,7 @@ import time
 RTMP_URL     = os.environ.get("DASHBOARD_RTMP_URL", "")
 ENCODER      = os.environ.get("DASHBOARD_ENCODER", "libx264")
 FPS          = os.environ.get("DASHBOARD_FPS", "25")
+OUTPUT_DELAY_SEC = os.environ.get("VIDEO_DELAY", 3)
 
 # Re-use VIDEO_ROOT & helper utilities dari mpv_controller agar tidak duplikat.
 from mpv_controller import (
@@ -51,7 +52,7 @@ _MAX_RETRIES    = 3
 # Helper: build FFmpeg command
 # ---------------------------------------------------------------------------
 
-def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=False):
+def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=False, output_delay_sec=0):
     """Bangun daftar argumen FFmpeg untuk publish satu file ke RTMP.
 
     seek_seconds > 0 → pakai -ss (input seeking, cepat untuk format yang support it).
@@ -74,6 +75,13 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
         cmd += ["-i", input_path]
     else:
         cmd += ["-re", "-i", input_path]
+
+    if not is_stream and output_delay_sec and output_delay_sec > 0:
+        delay_seconds = float(output_delay_sec)
+        delay_ms = int(delay_seconds * 1000)
+        cmd += ["-vf", f"setpts=PTS+{delay_seconds}/TB"]
+        cmd += ["-af", f"adelay={delay_ms}|{delay_ms}"]
+
 
     # Video encode / copy
     if encoder == "copy":
@@ -170,8 +178,11 @@ class FFmpegController:
         Mencatat stderr (non-blocking via thread) ke self._last_error.
         """
         self._kill_proc()
+        is_stream = input_path.startswith(("rtmp://", "srt://", "http://", "https://"))
+        output_delay_sec = OUTPUT_DELAY_SEC
         cmd = _build_ffmpeg_cmd(input_path, seek_seconds, self.rtmp_url,
-                                 self.encoder, self.fps, loop=loop)
+                                 self.encoder, self.fps, loop=loop,
+                                 output_delay_sec=output_delay_sec)
         try:
             self._proc = subprocess.Popen(
                 cmd,
@@ -187,6 +198,7 @@ class FFmpegController:
         self._last_error = None
         # Baca stderr di thread terpisah agar tidak blocking.
         proc_ref = self._proc
+
         def _read_stderr():
             lines = []
             try:
@@ -409,6 +421,8 @@ class FFmpegController:
             elapsed = now - _last_tick
             _last_tick = now
 
+            action = None
+
             with self._lock:
                 proc_alive = self._proc is not None and self._proc.poll() is None
 
@@ -428,12 +442,7 @@ class FFmpegController:
                     if rtmp_error and _retry_count < _MAX_RETRIES:
                         # RTMP disconnect/error → retry (M9)
                         _retry_count += 1
-                        time.sleep(_RETRY_INTERVAL)
-                        if (not self._paused and self._index is not None
-                                and self._playlist):
-                            self._start_proc(self._playlist[self._index],
-                                             seek_seconds=self._time_pos,
-                                             loop=self._loop_file)
+                        action = ("retry",)
                     else:
                         # Video selesai normal atau retry habis → next
                         _retry_count = 0
@@ -442,15 +451,37 @@ class FFmpegController:
                         if (not self._loop_file and self._index is not None
                                 and self._index + 1 < len(self._playlist)):
                             # Auto-next (M5)
-                            self._index    += 1
-                            self._time_pos  = 0.0
-                            self._chunk_progress += 1
-                            self._start_proc(self._playlist[self._index])
+                            action = ("next",)
                         elif self._loop_file and self._index is not None and self._playlist:
                             # Loop file selesai → restart dari 0
-                            self._time_pos = 0.0
-                            self._start_proc(self._playlist[self._index], loop=True)
+                            action = ("loop",)
                         else:
                             # Playlist habis → idle
-                            self._index    = None
-                            self._time_pos = 0.0
+                            action = ("idle",)
+
+            if action and action[0] == "retry":
+                time.sleep(_RETRY_INTERVAL)
+                with self._lock:
+                    if (not self._paused and self._index is not None and self._playlist):
+                        self._start_proc(self._playlist[self._index],
+                                             seek_seconds=self._time_pos,
+                                             loop=self._loop_file)
+
+            elif action and action[0] == "next":
+                with self._lock:
+                    if (self._index is not None and self._index + 1 < len(self._playlist)):
+                        self._index += 1
+                        self._time_pos = 0.0
+                        self._chunk_progress += 1
+                        self._start_proc(self._playlist[self._index])
+
+            elif action and action[0] == "loop":
+                with self._lock:
+                    if self._index is not None and self._playlist:
+                        self._time_pos = 0.0
+                        self._start_proc(self._playlist[self._index], loop=True)
+
+            elif action and action[0] == "idle":
+                with self._lock:
+                    self._index = None
+                    self._time_pos = 0.0
