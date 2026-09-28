@@ -457,11 +457,20 @@ class PrecisionScheduler:
 
                     self._current_entry_key = key
 
+                    if not self.controller.is_running() and self._current_entry_key != key:
+                        with open("scheduler_log.txt", "a") as f:
+                            f.write(f"{datetime.now()}: FFmpeg died/killed. Switching to new entry: {key}\n")
+
+
+
                     if self._switch_count >= self._restart_every():
                         self.controller.restart_process_only()
                         self._switch_count = 0
                         self._current_entry_key = None  # force reload next tick
-            except Exception:
+            except Exception as e:
+                with open("scheduler_log.txt", "a") as f:
+                    f.write(f"{datetime.now()}: Exception in loop: {e}\n")
+
                 # Never let the engine thread die silently.
                 pass
 
