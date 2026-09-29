@@ -75,7 +75,7 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
     else:
         cmd += [
             "-readrate", "1.0",
-            "-readrate_initial_burst", "5.0",
+            "-readrate_initial_burst", "0.5",
             "-i", input_path
             ]
 
@@ -87,18 +87,21 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
             "-c:v", encoder,
             "-r", fps,
             "-g", str(int(fps) * 2),  # keyframe interval = 2× FPS
-            "-b:v", "2000k",
+            "-b:v", "2500k",
+            "-minrate", "2500k",
             "-maxrate", "2500k",
-            "-bufsize", "5000k",
+            "-bufsize", "2500k",
         ]
         if encoder == "libx264":
             cmd += ["-preset", "veryfast", "-tune", "zerolatency"]
+
+    cmd +=["-use_wallclock_as_timestamps", "1",]
 
     # Audio
     cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"]
 
     # Output
-    cmd += ["-f", "flv", rtmp_url]
+    cmd += ["-rtmp_live", "live", "-f", "flv", rtmp_url]
     return cmd
 
 
