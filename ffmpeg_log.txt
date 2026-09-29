@@ -1,3 +1,0 @@
-2026-09-29 20:19:58.635352: DEBUG: FFmpeg process finished. Exit code: 0, Last error: [flv @ 0x61f35ddbbcc0] Failed to update header with correct filesize., Retrying RTMP: False2026-09-29 20:19:58.635580: Playlist ended. Going idle. Exit code: 0
-2026-09-29 20:21:08.645462: DEBUG: FFmpeg process finished. Exit code: 0, Last error: [flv @ 0x64c4d840d840] Failed to update header with correct filesize., Retrying RTMP: False2026-09-29 20:21:08.645645: Playlist ended. Going idle. Exit code: 0
-2026-09-29 20:21:53.653292: DEBUG: FFmpeg process finished. Exit code: 0, Last error: [flv @ 0x5a2742c91100] Failed to update header with correct filesize., Retrying RTMP: False2026-09-29 20:21:53.653508: Playlist ended. Going idle. Exit code: 0
