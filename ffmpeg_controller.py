@@ -87,10 +87,10 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
             "-c:v", encoder,
             "-r", fps,
             "-g", str(int(fps) * 2),  # keyframe interval = 2× FPS
-            "-b:v", "2500k",
-            "-minrate", "2500k",
-            "-maxrate", "2500k",
-            "-bufsize", "2500k",
+            "-b:v", "8500k",
+            "-minrate", "8500k",
+            "-maxrate", "8500k",
+            "-bufsize", "8500k",
         ]
         if encoder == "libx264":
             cmd += ["-preset", "veryfast", "-tune", "zerolatency"]
