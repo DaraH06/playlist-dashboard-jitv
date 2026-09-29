@@ -27,6 +27,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
+from logger import ffmpeg_logger
 # ---------------------------------------------------------------------------
 # Konstanta / env
 # ---------------------------------------------------------------------------
@@ -37,7 +38,6 @@ FPS          = os.environ.get("DASHBOARD_FPS", "25")
 
 # Re-use VIDEO_ROOT & helper utilities dari mpv_controller agar tidak duplikat.
 from mpv_controller import (
-    VIDEO_ROOT, ALLOWED_EXT,
     CHUNK_SIZE_MIN, CHUNK_SIZE_MAX,
     load_chunk_size, save_chunk_size, format_duration,
 )
@@ -260,52 +260,6 @@ class FFmpegController:
                                   loop=self._loop_file)
         return {"error": None}
 
-    def pause(self):
-        """Simpan posisi, matikan FFmpeg (FFmpeg tidak support pause native)."""
-        with self._lock:
-            if not self._paused and self._index is not None:
-                self._paused = True
-                self._kill_proc()
-        return {"error": None}
-
-    def stop(self):
-        """Hentikan playback sepenuhnya."""
-        with self._lock:
-            self._kill_proc()
-            self._index    = None
-            self._time_pos = 0.0
-            self._paused   = False
-            self._loop_file = False
-        return {"error": None}
-
-    def next(self):
-        """Pindah ke file berikutnya dalam playlist."""
-        with self._lock:
-            if self._index is None or not self._playlist:
-                return {"error": "no playlist"}
-            next_idx = self._index + 1
-            if next_idx >= len(self._playlist):
-                return {"error": "already at end"}
-            self._index        = next_idx
-            self._time_pos     = 0.0
-            self._paused       = False
-            self._chunk_progress += 1
-            self._start_proc(self._playlist[self._index])
-        return {"error": None}
-
-    def prev(self):
-        """Pindah ke file sebelumnya dalam playlist."""
-        with self._lock:
-            if self._index is None or not self._playlist:
-                return {"error": "no playlist"}
-            if self._index <= 0:
-                return {"error": "already at start"}
-            self._index    = self._index - 1
-            self._time_pos = 0.0
-            self._paused   = False
-            self._start_proc(self._playlist[self._index])
-        return {"error": None}
-
     def load_file_and_seek(self, full_path, seek_seconds=0, loop=False, duration=None):
         """Muat satu file dan seek ke posisi tertentu (dipakai PrecisionScheduler, M7)."""
         with self._lock:
@@ -439,8 +393,7 @@ class FFmpegController:
                                   self._last_error and
                                   "rtmp" in (self._last_error or "").lower())
                     
-                    with open("ffmpeg_log.txt", "a") as f:
-                            f.write(f"{datetime.now()}: DEBUG: FFmpeg process finished. Exit code: {exit_code}, Last error: {self._last_error}, Retrying RTMP: {rtmp_error}")
+                    ffmpeg_logger.info(f"DEBUG: FFmpeg process finished. Exit code: {exit_code}, Last error: {self._last_error}, Retrying RTMP: {rtmp_error}")
 
 
                     if rtmp_error and _retry_count < _MAX_RETRIES:
@@ -448,8 +401,7 @@ class FFmpegController:
                         _retry_count += 1
                         action = ("retry",)
                         
-                        with open("ffmpeg_log.txt", "a") as f:
-                                f.write(f"{datetime.now()}: RTMP error, retry {_retry_count}. Exit code: {exit_code}. Error: {self._last_error}\n")
+                        ffmpeg_logger.info(f"RTMP error, retry {_retry_count}. Exit code: {exit_code}. Error: {self._last_error}")
                     else:
                         # Video selesai normal atau retry habis → next
                         _retry_count = 0
@@ -459,18 +411,15 @@ class FFmpegController:
                                 and self._index + 1 < len(self._playlist)):
                             # Auto-next (M5)
                             action = ("next",)
-                            with open("ffmpeg_log.txt", "a") as f:
-                                f.write(f"{datetime.now()}: Video finished. Moving to next. Exit code: {exit_code}\n")
+                            ffmpeg_logger.info(f"Video finished. Moving to next. Exit code: {exit_code}")
                         elif self._loop_file and self._index is not None and self._playlist:
                             # Loop file selesai → restart dari 0
                             action = ("loop",)
-                            with open("ffmpeg_log.txt", "a") as f:
-                                f.write(f"{datetime.now()}: Looping file finished. Restarting. Exit code: {exit_code}\n")
+                            ffmpeg_logger.info(f"Looping file finished. Restarting. Exit code: {exit_code}")
                         else:
                             # Playlist habis → idle
                             action = ("idle",)
-                            with open("ffmpeg_log.txt", "a") as f:
-                                f.write(f"{datetime.now()}: Playlist ended. Going idle. Exit code: {exit_code}\n")
+                            ffmpeg_logger.info(f"Playlist ended. Going idle. Exit code: {exit_code}")
 
             if action and action[0] == "retry":
                 time.sleep(_RETRY_INTERVAL)

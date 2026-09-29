@@ -64,3 +64,6 @@ generate_playlist.py
 
 # Generated playlist files
 *.playlist
+
+#log
+*.log
