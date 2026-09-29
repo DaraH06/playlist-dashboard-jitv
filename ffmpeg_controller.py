@@ -418,17 +418,20 @@ class FFmpegController:
             exit_code = None
 
             with self._lock:
-                proc_alive = self._proc is not None and self._proc.poll() is None
+                if self._proc is None:
+                    continue
 
-                # Update posisi estimasi saat FFmpeg berjalan
-                if proc_alive and not self._paused:
-                    self._time_pos += elapsed
+                poll_result = self._proc.poll()
 
-                # Jika proses selesai dan tidak di-pause secara sengaja
-                if not proc_alive and not self._paused and self._index is not None:
-                    exit_code = self._proc.returncode if self._proc else None
-                    self._proc = None
+                if poll_result is None:
+                    if not self._paused:
+                        self._time_pos += elapsed
+                    continue
 
+                exit_code = poll_result
+                self._proc = None
+
+                if self._index is not None:
                     rtmp_error = (exit_code not in (0, None) and
                                   self._last_error and
                                   "rtmp" in (self._last_error or "").lower())
