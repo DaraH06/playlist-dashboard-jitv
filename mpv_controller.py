@@ -22,6 +22,7 @@ import subprocess
 import os
 import time
 import threading
+from logger import mpv_logger
 
 MPV_SOCKET = "/tmp/mpvsocket"
 # Real mount point used on this Pi (see README). Override with the
