@@ -26,7 +26,7 @@ import os
 import subprocess
 import threading
 import time
-
+from datetime import datetime
 # ---------------------------------------------------------------------------
 # Konstanta / env
 # ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
     loop=True        → pakai -stream_loop -1 (fallback video mengulang terus).
     """
     is_stream = input_path.startswith(("rtmp://", "srt://", "http://", "https://"))
-  
+
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
 
     if loop and not is_stream:
@@ -74,14 +74,11 @@ def _build_ffmpeg_cmd(input_path, seek_seconds, rtmp_url, encoder, fps, loop=Fal
         cmd += ["-fflags", "nobuffer", "-flags", "low_delay"]
         cmd += ["-i", input_path]
     else:
-        cmd += ["-re", "-i", input_path]
-
-    if not is_stream and output_delay_sec and output_delay_sec > 0:
-        delay_seconds = float(output_delay_sec)
-        delay_ms = int(delay_seconds * 1000)
-        cmd += ["-vf", f"setpts=PTS+{delay_seconds}/TB"]
-        cmd += ["-af", f"adelay={delay_ms}|{delay_ms}"]
-
+        cmd += [
+            "-readrate", "1.0",
+            "-readrate_initial_burst", "5.0",
+            "-i", input_path
+            ]
 
     # Video encode / copy
     if encoder == "copy":
@@ -422,27 +419,38 @@ class FFmpegController:
             _last_tick = now
 
             action = None
+            exit_code = None
 
             with self._lock:
-                proc_alive = self._proc is not None and self._proc.poll() is None
+                if self._proc is None:
+                    continue
 
-                # Update posisi estimasi saat FFmpeg berjalan
-                if proc_alive and not self._paused:
-                    self._time_pos += elapsed
+                poll_result = self._proc.poll()
 
-                # Jika proses selesai dan tidak di-pause secara sengaja
-                if not proc_alive and not self._paused and self._index is not None:
-                    exit_code = self._proc.returncode if self._proc else None
-                    self._proc = None
+                if poll_result is None:
+                    if not self._paused:
+                        self._time_pos += elapsed
+                    continue
 
+                exit_code = poll_result
+                self._proc = None
+
+                if self._index is not None:
                     rtmp_error = (exit_code not in (0, None) and
                                   self._last_error and
                                   "rtmp" in (self._last_error or "").lower())
+
+                    with open("ffmpeg_log.txt", "a") as f:
+                            f.write(f"{datetime.now()}: DEBUG: FFmpeg process finished. Exit code: {exit_code}, Last error: {self._last_error}, Retrying RTMP: {rtmp_error}")
+
 
                     if rtmp_error and _retry_count < _MAX_RETRIES:
                         # RTMP disconnect/error → retry (M9)
                         _retry_count += 1
                         action = ("retry",)
+
+                        with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: RTMP error, retry {_retry_count}. Exit code: {exit_code}. Error: {self._last_error}\n")
                     else:
                         # Video selesai normal atau retry habis → next
                         _retry_count = 0
@@ -452,12 +460,18 @@ class FFmpegController:
                                 and self._index + 1 < len(self._playlist)):
                             # Auto-next (M5)
                             action = ("next",)
+                            with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: Video finished. Moving to next. Exit code: {exit_code}\n")
                         elif self._loop_file and self._index is not None and self._playlist:
                             # Loop file selesai → restart dari 0
                             action = ("loop",)
+                            with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: Looping file finished. Restarting. Exit code: {exit_code}\n")
                         else:
                             # Playlist habis → idle
                             action = ("idle",)
+                            with open("ffmpeg_log.txt", "a") as f:
+                                f.write(f"{datetime.now()}: Playlist ended. Going idle. Exit code: {exit_code}\n")
 
             if action and action[0] == "retry":
                 time.sleep(_RETRY_INTERVAL)
