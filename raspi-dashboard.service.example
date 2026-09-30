@@ -1,0 +1,23 @@
+[Unit]
+Description=JITV Playout Dashboard (JITV/CCTV server, ffmpeg mode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=playlist
+Group=playlist
+WorkingDirectory=/home/playlist/playlist-dashboard-jitv
+Environment=DASHBOARD_USERNAME=admin
+Environment=DASHBOARD_PASSWORD_HASH=REPLACE_WITH_GENERATED_HASH
+Environment=DASHBOARD_SECRET_KEY=REPLACE_WITH_RANDOM_STRING
+Environment=DASHBOARD_VIDEO_ROOT=/mnt/videoserver
+Environment=DASHBOARD_PLAYER=ffmpeg
+Environment=DASHBOARD_ENCODER=libx264
+Environment=DASHBOARD_RTMP_URL=rtmp://127.0.0.1/demo
+ExecStart=/home/playlist/playlist-dashboard-jitv/.venv/bin/gunicorn --workers 1 --threads 4 --bind 0.0.0.0:8043 app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
