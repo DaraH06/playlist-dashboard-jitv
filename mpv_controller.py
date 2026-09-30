@@ -571,11 +571,11 @@ def make_controller():
     player = os.environ.get("DASHBOARD_PLAYER", "").lower()
 
     if player == "ffmpeg":
-        rtmp_url = os.environ.get("DASHBOARD_RTMP_URL", "")
+        rtmp_url = os.environ.get("RTMP_TARGET", "")
         if not rtmp_url:
             raise RuntimeError(
-                "DASHBOARD_PLAYER=ffmpeg tapi DASHBOARD_RTMP_URL tidak diset. "
-                "Set DASHBOARD_RTMP_URL ke URL RTMP tujuan (mis. rtmp://127.0.0.1:1935/live/jitv)."
+                "DASHBOARD_PLAYER=ffmpeg tapi RTMP_TARGET tidak diset. "
+                "Set RTMP_TARGET ke URL RTMP tujuan (mis. rtmp://127.0.0.1:1935/live/jitv)."
             )
         encoder = os.environ.get("DASHBOARD_ENCODER", "libx264")
         fps     = os.environ.get("DASHBOARD_FPS", "25")

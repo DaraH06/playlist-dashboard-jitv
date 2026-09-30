@@ -32,7 +32,7 @@ from logger import ffmpeg_logger
 # Konstanta / env
 # ---------------------------------------------------------------------------
 
-RTMP_URL     = os.environ.get("DASHBOARD_RTMP_URL", "")
+RTMP_URL     = os.environ.get("RTMP_TARGET  ", "")
 ENCODER      = os.environ.get("DASHBOARD_ENCODER", "libx264")
 FPS          = os.environ.get("DASHBOARD_FPS", "25")
 
