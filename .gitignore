@@ -16,6 +16,8 @@ venv.bak/
 .env
 .env.*
 !.env.example
+raspi-dashboard.service
+srs.conf
 
 # IDEs & Code Editors
 .idea/

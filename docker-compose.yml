@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  srs-relay:
+    image: ossrs/srs:5
+    container_name: srs_relay
+    ports:
+      - "${SRS_PORT}:1935"
+    volumes:
+      - ./srs.conf:/usr/local/srs/conf/srs.conf
+    restart: always
+
+  playout-app:
+    build: .
+    container_name: playout_app
+    command: tail -f /dev/null
+    ports:
+      - "8043:5000"
+    depends_on:
+      - srs-relay
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RTMP_TARGET=rtmp://srs-relay:1935/live/demo
+    volumes:
+      - /mnt/d/code/magang/videos:/mnt/videoserver
+      - .:/app
+    restart: no
