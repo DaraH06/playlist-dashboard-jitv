@@ -18,7 +18,7 @@ services:
       - srs-relay
     environment:
       - PYTHONUNBUFFERED=1
-      - RTMP_TARGET=rtmp://srs-relay:1935/live/ini
+      - RTMP_TARGET=rtmp://srs-relay:1935/live/ini?user=${USERNAME}&pass=${PASS}
     volumes:
       - /mnt/d/code/magang/videos:/mnt/videoserver
       - .:/app
