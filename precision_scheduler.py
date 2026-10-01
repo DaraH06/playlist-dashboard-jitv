@@ -34,11 +34,8 @@ from datetime import datetime, timezone, timedelta
 from logger import scheduler_logger
 
 # Jam dipatok eksplisit ke WIB (UTC+7), TIDAK ikut timezone sistem.
-try:
-    from zoneinfo import ZoneInfo
-    WIB = ZoneInfo("Asia/Jakarta")
-except Exception:
-    WIB = timezone(timedelta(hours=7))
+
+WIB = timezone(timedelta(hours=0))
 
 # Jam mulai siaran default. Dipakai hanya jika tidak ada playlist aktif
 # untuk auto-detect, dan tidak ada override di settings.json.
@@ -259,11 +256,7 @@ class PrecisionScheduler:
             if e["type"] == "video":
                 label = e["label"]
             elif e["type"] == "live":
-                fallbacks = self._get_fallback_fn()
-                if fallbacks:
-                    label = f"📺 Fallback (slot live: {e['label'][:40]})"
-                else:
-                    label = "Segmen Live CCTV (belum didukung)"
+                label = f"LIVE: {e['label']}"
             else:
                 fallbacks = self._get_fallback_fn()
                 if fallbacks:
@@ -437,7 +430,7 @@ class PrecisionScheduler:
                         self._switch_count += 1
                     elif active["type"] == "live":
                         stream_url = active["label"] 
-                        print(f"PrecisionScheduler: Switching to LIVE stream: {stream_url}")
+                        scheduler_logger.info(f"Switching to LIVE source: {stream_url}")
                         
                         self.controller.load_file_and_seek(
                             stream_url, 
