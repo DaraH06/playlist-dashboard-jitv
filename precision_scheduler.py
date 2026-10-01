@@ -433,12 +433,12 @@ class PrecisionScheduler:
                         )
                         self._switch_count += 1
                     elif active["type"] == "live":
-                        stream_url = active["label"] 
+                        stream_url = active["label"]
                         scheduler_logger.info(f"Switching to LIVE source: {stream_url}")
-                        
+
                         self.controller.load_file_and_seek(
-                            stream_url, 
-                            0, 
+                            stream_url,
+                            0,
                             duration=current_duration
                         )
                         self._switch_count += 1

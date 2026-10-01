@@ -57,7 +57,7 @@ _MAX_RETRIES    = 3
 def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
     """Source process: read file/stream -> normalize -> mpegts -> pipe:1."""
     is_stream = input_path.startswith(("rtmp://", "srt://", "http://", "https://"))
-  
+
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
 
     if loop and not is_stream:
@@ -79,7 +79,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
 
     # Normalization filter: scale & pad to target resolution, fix FPS
     vf = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
-    
+
     cmd += ["-vf", vf, "-r", fps]
 
     # Video encode
@@ -147,7 +147,7 @@ class FFmpegController:
         self.chunk_size  = load_chunk_size()
 
         # Gunakan RLock untuk menghindari deadlock saat fungsi internal saling panggil
-        self._lock         = threading.RLock() 
+        self._lock         = threading.RLock()
         self._publisher_proc = None        # Persistent RTMP process
         self._source_proc    = None        # Transient file/stream source
         self._bridge_thread  = None
@@ -203,7 +203,7 @@ class FFmpegController:
                     stderr=subprocess.PIPE,
                     text=False, # binary pipe
                 )
-                
+
                 # Monitor publisher stderr
                 pub_ref = self._publisher_proc
                 def _read_pub_stderr():
@@ -255,12 +255,12 @@ class FFmpegController:
         """Mulai source baru. Publisher harus sudah ada atau akan dibuat."""
         # Note: self._lock is RLock, so calling _ensure_publisher is safe here
         self._ensure_publisher()
-        
+
         with self._lock:
             self._kill_source()
             print(f"Starting Source: {input_path} (seek: {seek_seconds}s)", flush=True)
             cmd = _build_source_cmd(input_path, seek_seconds, self.encoder, self.fps, loop=loop)
-            
+
             try:
                 self._source_proc = subprocess.Popen(
                     cmd,
@@ -303,11 +303,11 @@ class FFmpegController:
             with self._lock:
                 src = self._source_proc
                 pub = self._publisher_proc
-            
+
             if src and pub and src.poll() is None:
                 try:
                     # Higher buffer for smooth playback
-                    data = src.stdout.read(42112) 
+                    data = src.stdout.read(42112)
                     if data:
                         try:
                             pub.stdin.write(data)
