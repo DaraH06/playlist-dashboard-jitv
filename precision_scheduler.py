@@ -34,8 +34,13 @@ from datetime import datetime, timezone, timedelta
 from logger import scheduler_logger
 
 # Jam dipatok eksplisit ke WIB (UTC+7), TIDAK ikut timezone sistem.
+# try:
+#     from zoneinfo import ZoneInfo
+#     WIB = ZoneInfo("Asia/Jakarta")
+# except Exception:
+#     WIB = timezone(timedelta(hours=7))
 
-WIB = timezone(timedelta(hours=0))
+WIB = timezone(timedelta(hours=-3))
 
 # Jam mulai siaran default. Dipakai hanya jika tidak ada playlist aktif
 # untuk auto-detect, dan tidak ada override di settings.json.
