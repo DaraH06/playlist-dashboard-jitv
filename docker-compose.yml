@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   srs-relay:
     image: ossrs/srs:5
@@ -8,7 +6,7 @@ services:
       - "${SRS_PORT}:1935"
     volumes:
       - ./srs.conf:/usr/local/srs/conf/srs.conf
-    restart: always
+    command: objs/srs -c conf/srs.conf
 
   playout-app:
     build: .
@@ -20,7 +18,7 @@ services:
       - srs-relay
     environment:
       - PYTHONUNBUFFERED=1
-      - RTMP_TARGET=rtmp://srs-relay:1935/live/demo
+      - RTMP_TARGET=rtmp://srs-relay:1935/live/ini
     volumes:
       - /mnt/d/code/magang/videos:/mnt/videoserver
       - .:/app
