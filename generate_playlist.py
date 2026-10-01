@@ -8,7 +8,6 @@ import os
 import subprocess
 import sys
 from datetime import date, datetime
-from logger import hasil_logger, hasil_logg
 
 
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".ts", ".m4v")
@@ -68,39 +67,6 @@ def scan_videos(video_dir):
                 videos.append((full_path, relative.replace(os.sep, "/")))
     return videos
 
-def getSpesification(path, ffprobe):
-    """
-    ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels -of csv=p=0 "$f"
-    """
-    result = subprocess.run(
-        [
-            ffprobe,
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=codec_name,width,height,r_frame_rate,pix_fmt",
-            "-of", "csv=p=0",
-            path,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    hasil_logger.info(f'path : {path} :\n\t {result.stdout.strip()}')
-    y = subprocess.run(
-        [
-            ffprobe,
-            "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=codec_name,sample_rate,channels",
-            "-of", "csv=p=0",
-            path,
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    hasil_logg.info(f'path : {path} :\n\t {y.stdout.strip()}')
-
 
 def build_playlist(video_dir, start_seconds, fps, ffprobe):
     videos = scan_videos(video_dir)
@@ -118,7 +84,6 @@ def build_playlist(video_dir, start_seconds, fps, ffprobe):
                 f"UTF8{relative_path}",
             )
         )
-        getSpesification(full_path, ffprobe)
         current += duration
     return rows
 
