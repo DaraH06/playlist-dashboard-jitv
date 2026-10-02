@@ -37,7 +37,7 @@ ENCODER      = os.environ.get("DASHBOARD_ENCODER", "libx264")
 FPS          = os.environ.get("DASHBOARD_FPS", "25")
 WIDTH        = os.environ.get("DASHBOARD_WIDTH", "1280")
 HEIGHT       = os.environ.get("DASHBOARD_HEIGHT", "720")
-BITRATE      = os.environ.get("DASHBOARD_BITRATE", "4000k")
+BITRATE      = os.environ.get("DASHBOARD_BITRATE", "8500k")
 
 # Re-use VIDEO_ROOT & helper utilities dari mpv_controller agar tidak duplikat.
 from mpv_controller import (
