@@ -1,25 +1,14 @@
 services:
-  srs-relay:
-    image: ossrs/srs:5
-    container_name: srs_relay
-    ports:
-      - "${SRS_PORT}:1935"
-    volumes:
-      - ./srs.conf:/usr/local/srs/conf/srs.conf
-    command: objs/srs -c conf/srs.conf
-
   playout-app:
     build: .
     container_name: playout_app
-    command: tail -f /dev/null
+    command: gunicorn --workers 1 --threads 4 --bind 0.0.0.0:8043 app:app
     ports:
-      - "8043:5000"
-    depends_on:
-      - srs-relay
+      - "8043:8043"
     environment:
       - PYTHONUNBUFFERED=1
-      - RTMP_TARGET=rtmp://${HOST_RTMP}:1935/live/ini?user=${UN}&pass=${PASS}
+      - RTMP_TARGET=${DASHBOARD_RTMP_URL}
     volumes:
-      - /mnt/d/code/magang/videos:/mnt/videoserver
+      - /mnt/videoserver:/mnt/videoserver
       - .:/app
-    restart: no
+    restart: always
