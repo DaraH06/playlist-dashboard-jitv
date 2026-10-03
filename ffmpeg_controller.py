@@ -35,8 +35,8 @@ from logger import ffmpeg_logger
 RTMP_URL     = os.environ.get("RTMP_TARGET", "")
 ENCODER      = os.environ.get("DASHBOARD_ENCODER", "libx264")
 FPS          = os.environ.get("DASHBOARD_FPS", "25")
-WIDTH        = os.environ.get("DASHBOARD_WIDTH", "1280")
-HEIGHT       = os.environ.get("DASHBOARD_HEIGHT", "720")
+WIDTH        = os.environ.get("DASHBOARD_WIDTH", "1920")
+HEIGHT       = os.environ.get("DASHBOARD_HEIGHT", "1080")
 BITRATE      = os.environ.get("DASHBOARD_BITRATE", "8500k")
 
 # Re-use VIDEO_ROOT & helper utilities dari mpv_controller agar tidak duplikat.
@@ -100,7 +100,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
         cmd += ["-preset", "veryfast", "-tune", "zerolatency"]
 
     # Audio normalization
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000"]
+    cmd += ["-c:a", "aac", "-b:a", "190k", "-ar", "48000"]
 
     # Output to MPEG-TS pipe
     cmd += ["-f", "mpegts", "pipe:1"]
