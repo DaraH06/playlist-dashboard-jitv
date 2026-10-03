@@ -186,7 +186,7 @@ class FFmpegController:
             if self._publisher_proc is not None and self._publisher_proc.poll() is None:
                 return
 
-            print(f"Starting Publisher to {self.rtmp_url}...", flush=True)
+            ffmpeg_logger.info(f"Starting Publisher to {self.rtmp_url}...")
             cmd = _build_publisher_cmd(self.rtmp_url)
             try:
                 self._publisher_proc = subprocess.Popen(
@@ -204,14 +204,14 @@ class FFmpegController:
                         for line in pub_ref.stderr:
                             l = line.decode('utf-8', errors='replace').rstrip()
                             if "error" in l.lower():
-                                print(f"[FFmpeg Publisher Error] {l}", flush=True)
+                                ffmpeg_logger.error(f"[FFmpeg Publisher Error] {l}")
                                 with self._lock:
                                     self._last_error = f"[Pub] {l}"
                     except Exception: pass
                 threading.Thread(target=_read_pub_stderr, daemon=True).start()
 
             except Exception as e:
-                print(f"CRITICAL: Failed to start publisher: {e}", flush=True)
+                ffmpeg_logger.critical(f"CRITICAL: Failed to start publisher: {e}")
                 self._last_error = f"Failed to start publisher: {e}"
                 self._publisher_proc = None
 
@@ -262,7 +262,7 @@ class FFmpegController:
                     text=False,
                 )
             except FileNotFoundError:
-                print("ERROR: FFmpeg command not found!", flush=True)
+                ffmpeg_logger.error("ERROR: FFmpeg command not found!")
                 self._last_error = "ffmpeg not found"
                 return
 
@@ -273,7 +273,7 @@ class FFmpegController:
                     for line in src_ref.stderr:
                         l = line.decode('utf-8', errors='replace').rstrip()
                         if "error" in l.lower() or "failed" in l.lower():
-                            print(f"[FFmpeg Source Error] {l}", flush=True)
+                            ffmpeg_logger.error(f"[FFmpeg Source Error] {l}")
                             with self._lock:
                                 if self._source_proc is src_ref:
                                     self._last_error = f"[Src] {l}"
@@ -304,7 +304,7 @@ class FFmpegController:
                             pub.stdin.write(data)
                             pub.stdin.flush()
                         except (BrokenPipeError, OSError):
-                            print("Bridge: Publisher pipe broken, restarting...", flush=True)
+                            ffmpeg_logger.info("Bridge: Publisher pipe broken, restarting...")
                             self._ensure_publisher()
                     else:
                         time.sleep(0.01)
