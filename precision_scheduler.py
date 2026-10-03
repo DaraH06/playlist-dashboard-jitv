@@ -34,11 +34,6 @@ from datetime import datetime, timezone, timedelta
 from logger import scheduler_logger
 
 # Jam dipatok eksplisit ke WIB (UTC+7), TIDAK ikut timezone sistem.
-# try:
-#     from zoneinfo import ZoneInfo
-#     WIB = ZoneInfo("Asia/Jakarta")
-# except Exception:
-#     WIB = timezone(timedelta(hours=7))
 
 try:
     from zoneinfo import ZoneInfo
