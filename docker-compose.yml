@@ -9,6 +9,7 @@ services:
       - PYTHONUNBUFFERED=1
       - RTMP_TARGET=${DASHBOARD_RTMP_URL}
     volumes:
+      - /etc/localtime:/etc/localtime:ro
       - /mnt/videoserver:/mnt/videoserver
       - .:/app
     restart: always

@@ -120,7 +120,7 @@ def build_playlist(video_dir, start_seconds, fps, ffprobe):
         )
         getSpesification(full_path, ffprobe)
         current += duration
-    return rows
+    return
 
 
 def main():
