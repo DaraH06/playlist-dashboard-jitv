@@ -100,7 +100,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
         cmd += ["-preset", "veryfast", "-tune", "zerolatency"]
 
     # Audio normalization
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000","-ac","2"]
+    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-avoid_negative_ts", "make_zero"]
 
     # Output to MPEG-TS pipe
     cmd += ["-f", "mpegts", "pipe:1"]
@@ -117,6 +117,7 @@ def _build_publisher_cmd(rtmp_url):
         "-analyzeduration", "2000000", "-probesize", "5000000",
         "-i", "pipe:0",
         "-c", "copy",
+        "-fflags", "+genpts",
         "-f", "flv", rtmp_url
     ]
     print(f"Publisher CMD:\n {' '.join(cmd)}", flush=True)
