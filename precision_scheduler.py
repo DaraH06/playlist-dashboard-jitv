@@ -31,6 +31,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone, timedelta
+from logger import scheduler_logger
 
 # Jam dipatok eksplisit ke WIB (UTC+7), TIDAK ikut timezone sistem.
 try:
@@ -435,19 +436,19 @@ class PrecisionScheduler:
                         )
                         self._switch_count += 1
                     elif active["type"] == "live":
-                        stream_url = active["label"] 
+                        stream_url = active["label"]
                         print(f"PrecisionScheduler: Switching to LIVE stream: {stream_url}")
-                        
+
                         self.controller.load_file_and_seek(
-                            stream_url, 
-                            0, 
+                            stream_url,
+                            0,
                             duration=current_duration
                         )
                         self._switch_count += 1
                     else:
                         # live segment, missing file, or gap:
                         # try to play a fallback video instead of showing blank.
-                        fallback_path, _ = self._pick_fallback(active["elapsed"])
+                        fallback_path = self._pick_fallback(active["elapsed"])
                         if fallback_path:
                             self.controller.load_file_and_seek(fallback_path, 0, loop=True)
                             self._switch_count += 1
@@ -458,9 +459,9 @@ class PrecisionScheduler:
                     self._current_entry_key = key
 
                     if not self.controller.is_running() and self._current_entry_key != key:
-                        with open("scheduler_log.txt", "a") as f:
-                            f.write(f"{datetime.now()}: FFmpeg died/killed. Switching to new entry: {key}\n")
-
+                        scheduler_logger.info(
+                            f"FFmpeg died/killed. Switching to new entry: {key}"
+                        )
 
 
                     if self._switch_count >= self._restart_every():
@@ -468,9 +469,7 @@ class PrecisionScheduler:
                         self._switch_count = 0
                         self._current_entry_key = None  # force reload next tick
             except Exception as e:
-                with open("scheduler_log.txt", "a") as f:
-                    f.write(f"{datetime.now()}: Exception in loop: {e}\n")
-
+                scheduler_logger.error(f"Exception in loop: {e}")
                 # Never let the engine thread die silently.
                 pass
 
