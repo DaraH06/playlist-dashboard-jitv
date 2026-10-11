@@ -65,7 +65,6 @@ Aplikasi membaca konfigurasi melalui environment variables:
 | `DASHBOARD_PASSWORD_HASH` | (hash dari `changeme123`) | Hash password admin (**Wajib diganti**) |
 | `DASHBOARD_SECRET_KEY` | `please-change-this-secret-key` | Secret key session Flask (**Wajib diganti**) |
 | `DASHBOARD_VIDEO_ROOT` | `/mnt/videoserver` | Folder root pustaka video (lokal / mount Samba) |
-| `DASHBOARD_CHUNK_SIZE` | `20` | Batas jumlah video sebelum proses player direfresh otomatis |
 | `DASHBOARD_PLAYER` | (auto / `mpv`) | Backend player: `mpv` (HDMI/Mock) atau `ffmpeg` (RTMP headless) |
 | `DASHBOARD_RTMP_URL` | `""` | URL RTMP tujuan publish (wajib diisi jika `DASHBOARD_PLAYER=ffmpeg`) |
 | `DASHBOARD_ENCODER` | `libx264` | Video encoder untuk FFmpeg (`h264_v4l2m2m`, `libx264`, atau `copy`) |
@@ -116,10 +115,8 @@ Buka browser ke `http://<ip-perangkat>:5000`.
    - Telusuri folder pustaka video pada modal picker dan klik **Pilih** pada video yang diinginkan.
    - Video fallback akan otomatis diputar secara bergantian ketika jadwal berada pada slot jeda, missing file, atau live CCTV.
 4. **Memantau Status Penayangan**:
-   - Bagian atas dashboard menyajikan status player aktif, judul video, dan counter sisa video sebelum auto-restart.
+   - Bagian atas dashboard menyajikan status player aktif dan judul konten. Pergantian video ditangani oleh FFmpeg tanpa restart player berdasarkan jumlah video.
    - Panel **Yang Sedang Berjalan di Player** menampilkan riwayat program yang *Sudah Diputar*, video yang *Sedang Diputar* (dilengkapi timer progress bar real-time), dan program *Berikutnya*.
-5. **Mengatur Ambang Batas Refresh Player**:
-   - Operator dapat mengubah nilai frekuensi refresh player (rentang 5–100 video) pada panel *Settings Bar* dan menekan tombol **Simpan**.
 
 ---
 

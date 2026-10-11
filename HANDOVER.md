@@ -113,13 +113,12 @@ Semua kode aplikasi berada di `/home/eksan/raspi-dashboard/` (atau direktori rep
 | File | Fungsi |
 |---|---|
 | `app.py` | Aplikasi Flask utama — routing web, autentikasi session, REST API (`/api/status`, `/api/browse`, `/api/fallback-videos`, `/api/import-zip-playlists`, `/api/precision/playlists/<date>`) |
-| `precision_scheduler.py` | **Mesin Playout Utama** — mengecek jam dinding WIB, auto-detect anchor jam siaran, memuat video sesuai timecode, seek ke posisi berjalan, rotasi fallback video round-robin, relay CCTV, dan auto-refresh player |
-| `mpv_controller.py` | Controller player MPV via IPC socket (`/tmp/mpvsocket`), background watcher auto-restart mitigasi memory leak, transisi video mulus (*seamless*), serta fungsi factory `make_controller()` |
+| `precision_scheduler.py` | **Mesin Playout Utama** — mengecek jam dinding WIB, auto-detect anchor jam siaran, memuat video sesuai timecode, seek ke posisi berjalan, rotasi fallback video round-robin, dan relay CCTV |
+| `mpv_controller.py` | Controller player MPV via IPC socket (`/tmp/mpvsocket`), transisi video mulus (*seamless*), serta fungsi factory `make_controller()` |
 | `ffmpeg_controller.py` | Controller player FFmpeg *headless* — spawn child process FFmpeg, publish ke RTMP, simulasi pause/seek, tracking waktu, buffer delay, dan auto-retry koneksi RTMP |
 | `generate_playlist.py` | Script CLI utilitas untuk membuat file `.playlist` presisi dari folder video lokal menggunakan pembacaan durasi riil `ffprobe` |
 | `fallback_videos.json`* | Data persistensi daftar video pengganti (*fallback*) untuk slot jeda, file missing, atau live CCTV |
 | `precision_playlists.json`* | Data persistensi jadwal harian per tanggal hasil impor file `.playlist`/`.ply`/`.zip`/`.txt` |
-| `settings.json`* | Data persistensi konfigurasi dashboard (misalnya `chunk_size` untuk frekuensi refresh player) |
 | `templates/dashboard.html` | Template HTML halaman dashboard (antarmuka presisi, fallback manager, status bar, modal rundown & picker) |
 | `templates/login.html` | Template HTML halaman login |
 | `static/app.js` | Logika frontend JavaScript — polling status, perataan timer lokal, rendering antarmuka, dan manajemen modal |
@@ -139,9 +138,7 @@ Semua kode aplikasi berada di `/home/eksan/raspi-dashboard/` (atau direktori rep
 
 **Root cause:** Chip decoder hardware di Raspberry Pi (`v4l2m2m`) **tidak melepas memori sepenuhnya** setiap kali video berganti dalam satu proses player yang sama (pola tangga naik pada RSS memori).
 
-**Solusi yang diterapkan:** Proses player di-restart secara berkala setelah sejumlah `N` video (diatur lewat kolom "Refresh player otomatis tiap N video", default 20, rentang 5–100).
-- Pada **MPV**: `MPVController` membunuh dan men-spawn ulang proses MPV, lalu reload file.
-- Pada **Mode Presisi**: `PrecisionScheduler` memanggil `controller.restart_process_only()`, dan pada tick berikutnya (2 detik kemudian) scheduler secara otomatis menghitung ulang posisi video dari jam dinding WIB. Video langsung berlanjut di detik yang tepat tanpa perlu pencatatan manual state resume.
+**Riwayat:** Mekanisme restart berkala berdasarkan jumlah video pernah diterapkan sebagai mitigasi memory leak MPV. Mekanisme tersebut, pengaturannya, dan indikator dashboard telah dihapus karena backend FFmpeg mengganti source saat pergantian video.
 
 **Cara cek jika gejala muncul kembali:**
 ```bash
@@ -246,8 +243,8 @@ Dashboard menerima file format ini baik dalam bentuk tunggal maupun dikompresi d
 
 ---
 
-### 4.11. Indikator counter restart player tidak sinkron (Terselesaikan)
-**Solusi:** `precision.status()` mengekspos field `switch_count` dan `restart_every`. Frontend menghitung sisa pergantian video secara real-time dan menampilkannya pada status bar: `refresh player otomatis dalam N video (Mode Presisi)`.
+### 4.11. Refresh otomatis player dihapus
+Pengaturan, indikator, endpoint, dan mekanisme restart player berdasarkan jumlah video telah dihapus. Backend FFmpeg mengganti proses source saat pergantian video melalui scheduler.
 
 ---
 
@@ -290,7 +287,7 @@ Diimplementasikan fungsi `_broadcast_start_hour()` dan `_broadcast_date_and_seco
    - Jika tipe `video`: Memuat file dan langsung seek ke `now - start_time`.
    - Jika tipe `live`: Memuat relay stream Live CCTV.
    - Jika tipe `missing` atau jeda (*gap*): Memuat video pengganti (*fallback*).
-4. Setiap pergantian video, `switch_count` bertambah. Begitu mencapai target `chunk_size`, proses player di-restart untuk membersihkan RAM dan langsung disinkronkan kembali pada tick berikutnya.
+4. Pergantian konten diatur langsung oleh scheduler; tidak ada restart player tambahan berdasarkan hitungan video.
 
 ### 5.2. Format & Cara Impor Jadwal
 - Buka dashboard di browser, temukan panel **Playlist Tersimpan**.

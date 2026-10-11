@@ -97,41 +97,6 @@ header h1 { font-size: 18px; margin: 0; }
   flex-shrink: 0;
 }
 .dot.on { background: var(--accent); }
-.chunk-text {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-dim);
-  opacity: 0.7;
-}
-
-.settings-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 24px 16px;
-  font-size: 13px;
-  color: var(--text-dim);
-  flex-wrap: wrap;
-}
-.settings-bar input[type="number"] {
-  width: 64px;
-  padding: 6px 8px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-}
-.settings-bar button {
-  padding: 6px 14px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 13px;
-}
-.settings-bar button:hover { border-color: var(--accent); }
 .chunk-size-saved-note {
   font-size: 12px;
 }
@@ -583,7 +548,6 @@ button.btn-danger:hover {
     padding: 12px 16px;
   }
   .status-bar,
-  .settings-bar,
   .controls,
   .precision-panel,
   .queue-panel,
@@ -599,10 +563,6 @@ button.btn-danger:hover {
   .queue-columns {
     grid-template-columns: 1fr;
   }
-  .chunk-text {
-    margin-left: 0;
-    width: 100%;
-  }
   .precision-status-row button {
     margin-left: 0;
     width: 100%;
@@ -617,5 +577,4 @@ button.btn-danger:hover {
     min-width: 100%;
   }
 }
-
 

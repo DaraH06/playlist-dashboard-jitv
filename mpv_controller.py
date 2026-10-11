@@ -1,21 +1,4 @@
-"""
-Controls a persistent mpv instance via its JSON IPC socket, and guards
-against the known Raspberry Pi v4l2m2m hardware-decoder memory leak
-(confirmed by direct RSS measurement: memory climbs every track change
-and never drops back down within one long-running process).
-
-Instead of restarting mpv on every button click (the old nohup + pkill
-setup) or never restarting it at all (unsafe for 24/7 playback), this
-controller:
-  - keeps ONE mpv process alive for normal play/pause/stop/next/prev,
-    controlled entirely over the IPC socket (fast, no flicker), and
-  - silently kills + respawns that process every CHUNK_SIZE tracks,
-    then reloads the same playlist and jumps back to the same
-    position, so memory is reclaimed before it becomes a problem.
-    The dashboard/API surface looks continuous; only a short
-    (sub-second) black flash happens at the DRM level during a chunk
-    restart, exactly like the tested standalone chunking script.
-"""
+"""Controls a persistent mpv instance via its JSON IPC socket."""
 import socket
 import json
 import subprocess
@@ -30,37 +13,7 @@ MPV_SOCKET = "/tmp/mpvsocket"
 VIDEO_ROOT = os.environ.get("DASHBOARD_VIDEO_ROOT", "/mnt/videoserver")
 ALLOWED_EXT = (".mp4", ".mkv", ".avi", ".mov", ".ts", ".m4v")
 
-# How many tracks to play before silently restarting mpv to reclaim
-# leaked hardware-decoder memory. This is the fallback default (used
-# the very first time the app runs); after that, the value the user
-# sets from the dashboard is persisted to SETTINGS_FILE and wins.
-DEFAULT_CHUNK_SIZE = int(os.environ.get("DASHBOARD_CHUNK_SIZE", "20"))
-CHUNK_SIZE_MIN = 5
-CHUNK_SIZE_MAX = 100
-
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
-
 M3U_PATH = "/tmp/dashboard_playlist.m3u"
-
-
-def load_chunk_size():
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE) as f:
-                value = json.load(f).get("chunk_size")
-            if isinstance(value, int) and CHUNK_SIZE_MIN <= value <= CHUNK_SIZE_MAX:
-                return value
-        except (OSError, json.JSONDecodeError):
-            pass
-    return DEFAULT_CHUNK_SIZE
-
-
-def save_chunk_size(value):
-    try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump({"chunk_size": value}, f)
-    except OSError:
-        pass
 
 
 def format_duration(seconds):
@@ -89,22 +42,6 @@ class MPVController:
         self.socket_path = socket_path
         self.proc = None
         self._lock = threading.Lock()
-        self._chunk_progress = 0
-        self._last_seen_pos = None
-        self._watcher_started = False
-        self.chunk_size = load_chunk_size()
-
-    def set_chunk_size(self, value):
-        try:
-            value = int(value)
-        except (TypeError, ValueError):
-            raise ValueError("chunk size must be a whole number")
-        if not (CHUNK_SIZE_MIN <= value <= CHUNK_SIZE_MAX):
-            raise ValueError(f"chunk size must be between {CHUNK_SIZE_MIN} and {CHUNK_SIZE_MAX}")
-        self.chunk_size = value
-        self._chunk_progress = 0  # start counting fresh against the new threshold
-        save_chunk_size(value)
-        return self.chunk_size
 
     # ---------- low-level process management ----------
 
@@ -150,14 +87,6 @@ class MPVController:
     def start(self):
         """Launch mpv in idle mode with the IPC socket enabled."""
         if self.is_running():
-            # mpv survived a previous run of this app (e.g. we just
-            # restarted the systemd service) — still make sure OUR
-            # background chunk-restart watcher is running for it.
-            # Without this, the watcher would only ever start the
-            # first time this process spawns a brand new mpv, and
-            # every subsequent app restart would silently leave a
-            # long-lived mpv with no memory-leak safety net at all.
-            self._ensure_watcher()
             return
         if os.path.exists(self.socket_path):
             try:
@@ -192,7 +121,6 @@ class MPVController:
         for _ in range(50):
             if os.path.exists(self.socket_path):
                 time.sleep(0.3)
-                self._ensure_watcher()
                 return
             time.sleep(0.1)
 
@@ -220,8 +148,6 @@ class MPVController:
             with open(M3U_PATH, "w") as f:
                 for p in filepaths:
                     f.write(p + "\n")
-            self._chunk_progress = 0
-            self._last_seen_pos = None
             self._send(["set_property", "loop-playlist", "inf"])
             self._send(["loadlist", M3U_PATH, "replace"])
             return self._send(["set_property", "pause", False])
@@ -301,54 +227,12 @@ class MPVController:
             "current_file": path.get("data"),
             "playlist_index": current_index,
             "playlist_count": count.get("data"),
-            "chunk_progress": self._chunk_progress,
-            "chunk_size": self.chunk_size,
             "current_time_pos": time_pos_sec,
             "current_time_str": format_duration(time_pos_sec),
             "current_duration_sec": current_duration_sec,
             "current_duration_str": format_duration(current_duration_sec),
             "playlist": items,
         }
-
-    # ---------- background memory guard ----------
-
-    def _restart_and_resume(self):
-        """Kill + respawn mpv, reload the same playlist, and jump back
-        to the track that was playing. Used periodically to reclaim
-        memory the v4l2m2m decoder leaks across track changes."""
-        with self._lock:
-            pos_res = self._send(["get_property", "playlist-pos"])
-            resume_index = pos_res.get("data") or 0
-            self._kill_existing()
-            self.start()
-            if os.path.exists(M3U_PATH):
-                self._send(["loadlist", M3U_PATH, "replace"])
-                self._send(["set_property", "playlist-pos", resume_index])
-                self._send(["set_property", "pause", False])
-            self._chunk_progress = 0
-            self._last_seen_pos = resume_index
-
-    def _watch_loop(self):
-        while True:
-            time.sleep(5)
-            try:
-                if not self.is_running():
-                    continue
-                res = self._send(["get_property", "playlist-pos"])
-                pos = res.get("data")
-                if pos is None:
-                    continue
-                if self._last_seen_pos is None:
-                    self._last_seen_pos = pos
-                    continue
-                if pos != self._last_seen_pos:
-                    self._chunk_progress += 1
-                    self._last_seen_pos = pos
-                    if self._chunk_progress >= self.chunk_size:
-                        self._restart_and_resume()
-            except Exception:
-                # Never let the watcher thread die silently.
-                pass
 
     # ---------- direct file control ----------
 
@@ -407,22 +291,6 @@ class MPVController:
         plain black screen."""
         self._send(["stop"])
 
-    def restart_process_only(self):
-        """Kill mpv without trying to resume any playlist afterward —
-        precision mode always re-derives what should be playing from
-        the wall clock on its next tick, so no resume bookkeeping is
-        needed here (unlike simple mode's _restart_and_resume)."""
-        with self._lock:
-            self._kill_existing()
-            self.start()
-
-    def _ensure_watcher(self):
-        if self._watcher_started:
-            return
-        self._watcher_started = True
-        t = threading.Thread(target=self._watch_loop, daemon=True)
-        t.start()
-
 class MockMPVController:
     """Simulasi in-memory MPVController untuk development lokal di Windows.
 
@@ -434,7 +302,6 @@ class MockMPVController:
     """
 
     def __init__(self, socket_path=None):
-        self.chunk_size = load_chunk_size()
         self._lock = threading.Lock()
         self._running = False
         self._paused  = False
@@ -442,7 +309,6 @@ class MockMPVController:
         self._index    = None    # current playlist index
         self._time_pos = 0.0     # detik saat ini di video
         self._duration = 0.0     # durasi video saat ini (0 jika tidak diketahui)
-        self._chunk_progress = 0
         threading.Thread(target=self._tick, daemon=True).start()
 
     # --- timer background ---
@@ -459,7 +325,6 @@ class MockMPVController:
                             self._index   += 1
                             self._time_pos = 0.0
                             self._duration = 120.0  # durasi tiruan 2 menit per video
-                            self._chunk_progress += 1
                         else:
                             # video selesai (tanpa loop) -> masuk state idle
                             self._index    = None
@@ -492,7 +357,6 @@ class MockMPVController:
             self._time_pos      = 0.0
             self._duration      = 120.0  # tiruan 2 menit per video
             self._paused        = False
-            self._chunk_progress = 0
         return {"error": None}
 
     def get_playlist(self):
@@ -519,25 +383,12 @@ class MockMPVController:
                 "current_file":          self._playlist[self._index] if self._index is not None else None,
                 "playlist_index":        self._index,
                 "playlist_count":        len(self._playlist),
-                "chunk_progress":        self._chunk_progress,
-                "chunk_size":            self.chunk_size,
                 "current_time_pos":      self._time_pos,
                 "current_time_str":      format_duration(self._time_pos),
                 "current_duration_sec":  self._duration,
                 "current_duration_str":  format_duration(self._duration),
                 "playlist":              items,
             }
-
-    def set_chunk_size(self, value):
-        try:
-            value = int(value)
-        except (TypeError, ValueError):
-            raise ValueError("chunk size must be a whole number")
-        if not (CHUNK_SIZE_MIN <= value <= CHUNK_SIZE_MAX):
-            raise ValueError(f"chunk size must be between {CHUNK_SIZE_MIN} and {CHUNK_SIZE_MAX}")
-        self.chunk_size = value
-        save_chunk_size(value)
-        return self.chunk_size
 
     # --- direct file control ---
     def load_file_and_seek(self, full_path, seek_seconds=0, loop=False):
@@ -556,10 +407,6 @@ class MockMPVController:
             self._time_pos = 0.0
             self._duration = 0.0
             self._paused   = True
-
-    def restart_process_only(self):
-        pass  # tidak ada proses nyata
-
 
 def make_controller():
     """Pilih controller yang tepat berdasarkan environment:
