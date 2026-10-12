@@ -67,7 +67,8 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
         cmd += ["-ss", str(float(seek_seconds))]
 
     if is_stream:
-        cmd += ["-fflags", "nobuffer", "-flags", "low_delay"]
+        cmd += ["-use_wallclock_as_timestamps", "1"]
+        cmd += ["-fflags", "+genpts+discardcorrupt+nobuffer", "-flags", "low_delay"]
         cmd += ["-i", input_path]
     else:
         cmd += [
@@ -97,10 +98,12 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
         "-bufsize", str(int(BITRATE.replace('k','')) * 2) + "k",
     ]
     if actual_encoder == "libx264":
-        cmd += ["-preset", "veryfast", "-tune", "zerolatency"]
+        cmd += ["-preset", "veryfast"]
 
     # Audio normalization
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-avoid_negative_ts", "make_zero"]
+    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+            "-af", "pan=stereo|c0=c0|c1=c1,aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
+            "-avoid_negative_ts", "make_zero"]
 
     # Output to MPEG-TS pipe
     cmd += ["-f", "mpegts", "pipe:1"]
@@ -116,7 +119,10 @@ def _build_publisher_cmd(rtmp_url):
         "-f", "mpegts",
         "-analyzeduration", "2000000", "-probesize", "5000000",
         "-i", "pipe:0",
-        "-c", "copy",
+        "-c:v", "copy",
+        "-bsf:v", "dump_extra",
+        "-c:a", "copy",
+        "-max_interleave_delta", "0",
         "-fflags", "+genpts",
         "-f", "flv", rtmp_url
     ]
@@ -289,6 +295,8 @@ class FFmpegController:
 
     def _bridge_loop(self):
         """Jembatan data dari source.stdout ke publisher.stdin."""
+        CHUNK_ALIGN = 42112
+
         while not self._stop_bridge:
             src = None
             pub = None
@@ -299,7 +307,7 @@ class FFmpegController:
             if src and pub and src.poll() is None:
                 try:
                     # Higher buffer for smooth playback
-                    data = src.stdout.read(32768) 
+                    data = src.stdout.read(42112) 
                     if data:
                         try:
                             pub.stdin.write(data)

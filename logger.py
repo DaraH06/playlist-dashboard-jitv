@@ -15,11 +15,11 @@ class TruncatingFileHandler(logging.FileHandler):
         super().emit(record)
 
 
-def setup_logger(name, log_file, max_bytes=5 * 1024 * 1024):
+def setup_logger(name, log_file, max_bytes=1 * 1024 * 1024):
     """
     Helper untuk membuat logger satu file tunggal yang otomatis dibersihkan.
     - log_file: nama file log (ditentukan oleh pemanggil)
-    - max_bytes: batas ukuran file sebelum dibersihkan (default: 5 MB)
+    - max_bytes: batas ukuran file sebelum dibersihkan (default: 1 MB)
     """
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
@@ -36,6 +36,7 @@ def setup_logger(name, log_file, max_bytes=5 * 1024 * 1024):
 
 scheduler_logger = setup_logger("scheduler", "log_scheduler.log")
 ffmpeg_logger = setup_logger("ffmpeg", "log_ffmpeg.log")
+ffmpeg_stats_debug = setup_logger("ffmpeg_stats", "stats_ffmpeg")
 mpv_logger = setup_logger("mpv", "log_mpv.log")
 hasil_video = setup_logger("video", "scan_video.log")
 hasil_audio = setup_logger("audio", "scan_audio.log")
