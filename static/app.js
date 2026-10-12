@@ -169,12 +169,10 @@ async function pollStatus() {
   const s = await api("/api/status");
   const dot = document.getElementById("status-dot");
   const text = document.getElementById("status-text");
-  const chunkText = document.getElementById("chunk-text");
 
   if (!s.running) {
     dot.classList.remove("on");
     text.textContent = "Player belum jalan (akan otomatis start saat kamu tekan Play/Terapkan)";
-    chunkText.textContent = "";
     renderQueueList("queue-played", [], "Belum ada video yang diputar");
     renderQueueList("queue-playing", [], "Tidak ada yang sedang diputar");
     renderQueueList("queue-upcoming", [], "Belum ada playlist aktif");
@@ -186,16 +184,6 @@ async function pollStatus() {
   const state = s.paused ? "Paused" : "Playing";
   const file = s.current_file ? s.current_file.split("/").pop() : "-";
   text.textContent = `${state} — ${file} (${(s.playlist_index ?? 0) + 1}/${s.playlist_count ?? 0})`;
-
-  if (s.precision_timeline) {
-    // Mode Presisi punya counter restart-nya sendiri (switch_count),
-    // terpisah dari chunk_progress mode Sederhana yang sengaja
-    // berhenti nambah selama Mode Presisi aktif.
-    const sisa = s.precision_restart_every - s.precision_switch_count;
-    chunkText.textContent = `refresh player otomatis dalam ${sisa} video (Mode Presisi)`;
-  } else {
-    chunkText.textContent = `refresh player otomatis dalam ${s.chunk_size - s.chunk_progress} video`;
-  }
 
   if (s.precision_timeline) {
     // Mode Presisi: mpv cuma pernah dimuati satu file per saat, jadi
@@ -216,45 +204,6 @@ async function pollStatus() {
   }
   renderNowPlayingTimer(s);
 }
-
-// ---------- Chunk-size setting (auto-restart threshold) ----------
-
-async function loadChunkSizeSetting() {
-  const s = await api("/api/settings");
-  const input = document.getElementById("chunk-size-input");
-  input.min = s.chunk_size_min;
-  input.max = s.chunk_size_max;
-  input.value = s.chunk_size;
-}
-
-document.getElementById("btn-save-chunk-size").onclick = async () => {
-  const input = document.getElementById("chunk-size-input");
-  const note = document.getElementById("chunk-size-saved-note");
-  const value = parseInt(input.value, 10);
-
-  if (isNaN(value) || value < parseInt(input.min, 10) || value > parseInt(input.max, 10)) {
-    note.textContent = `Masukkan angka ${input.min}-${input.max}`;
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-
-  const res = await api("/api/settings", {
-    method: "POST",
-    body: JSON.stringify({ chunk_size: value }),
-  });
-
-  if (res.error) {
-    note.textContent = res.error;
-    note.className = "chunk-size-saved-note error";
-    return;
-  }
-
-  input.value = res.chunk_size;
-  note.textContent = "Tersimpan ✓";
-  note.className = "chunk-size-saved-note ok";
-  setTimeout(() => { note.textContent = ""; }, 2500);
-  pollStatus();
-};
 
 // ---------- Named playlists (for scheduling) ----------
 
@@ -465,7 +414,6 @@ async function loadPrecisionStatus() {
 }
 
 browseTo("");
-loadChunkSizeSetting();
 loadNamedPlaylists();
 loadPrecisionStatus();
 loadFallbackVideos();

@@ -118,7 +118,6 @@ def build_playlist(video_dir, start_seconds, fps, ffprobe):
                 f"UTF8{relative_path}",
             )
         )
-        getSpesification(full_path, ffprobe)
         current += duration
     return
 

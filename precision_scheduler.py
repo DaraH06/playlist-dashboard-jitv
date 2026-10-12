@@ -34,6 +34,11 @@ from datetime import datetime, timezone, timedelta
 from logger import scheduler_logger
 
 # Jam dipatok eksplisit ke WIB (UTC+7), TIDAK ikut timezone sistem.
+# try:
+#     from zoneinfo import ZoneInfo
+#     WIB = ZoneInfo("Asia/Jakarta")
+# except Exception:
+#     WIB = timezone(timedelta(hours=7))
 
 try:
     from zoneinfo import ZoneInfo
@@ -48,7 +53,6 @@ _BROADCAST_START_HOUR_DEFAULT = 6
 
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
 TICK_SECONDS = 2
-PRECISION_RESTART_EVERY = 20  # same rationale/value as simple-mode chunk_size default
 CCTV_LIVE = os.environ.get("CCTV_RTMP", "rtmp://172.16.16.222:1935/live/livecctv")
 TIMECODE_RE = re.compile(r"^(\d+):(\d{2}):(\d{2}):(\d{2})$")
 
@@ -158,7 +162,6 @@ class PrecisionScheduler:
         self.playlists = load_precision_playlists()  # {date_name: [entries]}
         self.active_date = None
         self._current_entry_key = None  # (date, start) of what's loaded now
-        self._switch_count = 0
         self._fallback_index = 0  # round-robin pointer for fallback list
         self._thread = None
         self._start_thread()
@@ -213,17 +216,7 @@ class PrecisionScheduler:
                 "total_entries_today": len(today_entries),
                 "current": current,
                 "upcoming": upcoming,
-                "switch_count": self._switch_count,
-                "restart_every": self._restart_every(),
             }
-
-    def _restart_every(self):
-        value = getattr(self.controller, "chunk_size", PRECISION_RESTART_EVERY)
-        try:
-            value = int(value)
-        except (TypeError, ValueError):
-            value = PRECISION_RESTART_EVERY
-        return max(1, value)
 
     def _pick_fallback(self, elapsed_in_slot=0):
         """Pilih fallback video secara round-robin.
@@ -383,7 +376,6 @@ class PrecisionScheduler:
                     if self._current_entry_key != no_sched_key:
                         if fallback_path:
                             self.controller.load_file_and_seek(fallback_path, 0, loop=False)
-                            self._switch_count += 1
                         else:
                             self.controller.show_blank()
                         self._current_entry_key = no_sched_key
@@ -408,7 +400,6 @@ class PrecisionScheduler:
                     if self._current_entry_key != gap_key:
                         if fallback_path:
                             self.controller.load_file_and_seek(fallback_path, 0, loop=False)
-                            self._switch_count += 1
                         else:
                             self.controller.show_blank()
                         self._current_entry_key = gap_key
@@ -431,24 +422,21 @@ class PrecisionScheduler:
                             float(active["elapsed"]),
                             duration=current_duration,
                         )
-                        self._switch_count += 1
                     elif active["type"] == "live":
-                        stream_url = active["label"] 
+                        stream_url = active["label"]
                         scheduler_logger.info(f"Switching to LIVE source: {stream_url}")
-                        
+
                         self.controller.load_file_and_seek(
-                            stream_url, 
-                            0, 
+                            stream_url,
+                            0,
                             duration=current_duration
                         )
-                        self._switch_count += 1
                     else:
                         # live segment, missing file, or gap:
                         # try to play a fallback video instead of showing blank.
                         fallback_path = self._pick_fallback(active["elapsed"])
                         if fallback_path:
                             self.controller.load_file_and_seek(fallback_path, 0, loop=True)
-                            self._switch_count += 1
                             self._fallback_index += 1
                         else:
                             self.controller.show_blank()
@@ -461,10 +449,6 @@ class PrecisionScheduler:
                         )
 
 
-                    if self._switch_count >= self._restart_every():
-                        self.controller.restart_process_only()
-                        self._switch_count = 0
-                        self._current_entry_key = None  # force reload next tick
             except Exception as e:
                 scheduler_logger.error(f"Exception in loop: {e}")
                 # Never let the engine thread die silently.

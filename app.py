@@ -219,38 +219,8 @@ def api_status():
         # mpv's own playlist selalu cuma 1 entri di Mode Presisi (lihat
         # docstring PrecisionScheduler.timeline) — pakai daftar
         # sudah-diputar/berikutnya dari jadwal presisi sbg gantinya.
-    p_status = precision.status()
     data["precision_timeline"] = precision.timeline()
-    data["precision_switch_count"] = p_status["switch_count"]
-    data["precision_restart_every"] = p_status["restart_every"]
     return jsonify(data)
-
-
-@app.route("/api/settings", methods=["GET"])
-@login_required
-def api_get_settings():
-    from mpv_controller import CHUNK_SIZE_MIN, CHUNK_SIZE_MAX
-    return jsonify({
-        "chunk_size": mpv.chunk_size,
-        "chunk_size_min": CHUNK_SIZE_MIN,
-        "chunk_size_max": CHUNK_SIZE_MAX,
-    })
-
-
-@app.route("/api/settings", methods=["POST"])
-@login_required
-def api_set_settings():
-    from mpv_controller import CHUNK_SIZE_MIN, CHUNK_SIZE_MAX
-    value = request.json.get("chunk_size")
-    try:
-        new_value = mpv.set_chunk_size(value)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify({
-        "chunk_size": new_value,
-        "chunk_size_min": CHUNK_SIZE_MIN,
-        "chunk_size_max": CHUNK_SIZE_MAX,
-    })
 
 
 # ---------- fallback videos (pengganti slot live CCTV / gap) ----------

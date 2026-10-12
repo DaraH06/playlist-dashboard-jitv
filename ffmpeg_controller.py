@@ -11,7 +11,6 @@ Desain utama
   posisi terakhir, mematikan proses, lalu restart dari posisi itu saat play.
 - Playlist sequential (M5): watcher thread deteksi FFmpeg selesai → auto next.
 - Precision mode (M7): load_file_and_seek() dipanggil oleh PrecisionScheduler.
-- Refresh (M8): restart_process_only() hitung ulang dari wall-clock.
 - Retry RTMP (M9): max 3 percobaan, interval 5 detik.
 - Thread safety: threading.Lock() melingkupi semua akses ke state dan proses.
 
@@ -39,11 +38,8 @@ WIDTH        = os.environ.get("DASHBOARD_WIDTH", "1920")
 HEIGHT       = os.environ.get("DASHBOARD_HEIGHT", "1080")
 BITRATE      = os.environ.get("DASHBOARD_BITRATE", "8500k")
 
-# Re-use VIDEO_ROOT & helper utilities dari mpv_controller agar tidak duplikat.
-from mpv_controller import (
-    CHUNK_SIZE_MIN, CHUNK_SIZE_MAX,
-    load_chunk_size, save_chunk_size, format_duration,
-)
+# Re-use the duration formatter from mpv_controller.
+from mpv_controller import format_duration
 
 # Berapa detik tunggu sebelum retry saat FFmpeg gagal konek ke RTMP.
 _RETRY_INTERVAL = 5
@@ -57,7 +53,7 @@ _MAX_RETRIES    = 3
 def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
     """Source process: read file/stream -> normalize -> mpegts -> pipe:1."""
     is_stream = input_path.startswith(("rtmp://", "srt://", "http://", "https://"))
-  
+
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
 
     if loop and not is_stream:
@@ -79,7 +75,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
 
     # Normalization filter: scale & pad to target resolution, fix FPS
     vf = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
-    
+
     cmd += ["-vf", vf, "-r", fps]
 
     # Video encode
@@ -144,10 +140,8 @@ class FFmpegController:
         self.rtmp_url    = rtmp_url  or RTMP_URL
         self.encoder     = encoder   or ENCODER
         self.fps         = fps       or FPS
-        self.chunk_size  = load_chunk_size()
-
         # Gunakan RLock untuk menghindari deadlock saat fungsi internal saling panggil
-        self._lock         = threading.RLock() 
+        self._lock         = threading.RLock()
         self._publisher_proc = None        # Persistent RTMP process
         self._source_proc    = None        # Transient file/stream source
         self._bridge_thread  = None
@@ -159,29 +153,12 @@ class FFmpegController:
         self._paused       = False
         self._loop_file    = False
         self._last_error   = None          # string error terakhir / None
-        self._chunk_progress = 0
         self._current_duration_sec = None
         self._current_duration_str = "--:--"
         self._watcher_started = False
 
         self._ensure_publisher()
         self._ensure_watcher()
-
-    # ------------------------------------------------------------------
-    # set_chunk_size (interface compatibility)
-    # ------------------------------------------------------------------
-
-    def set_chunk_size(self, value):
-        try:
-            value = int(value)
-        except (TypeError, ValueError):
-            raise ValueError("chunk size must be a whole number")
-        if not (CHUNK_SIZE_MIN <= value <= CHUNK_SIZE_MAX):
-            raise ValueError(f"chunk size must be between {CHUNK_SIZE_MIN} and {CHUNK_SIZE_MAX}")
-        self.chunk_size = value
-        self._chunk_progress = 0
-        save_chunk_size(value)
-        return self.chunk_size
 
     # ------------------------------------------------------------------
     # Process management
@@ -203,7 +180,7 @@ class FFmpegController:
                     stderr=subprocess.PIPE,
                     text=False, # binary pipe
                 )
-                
+
                 # Monitor publisher stderr
                 pub_ref = self._publisher_proc
                 def _read_pub_stderr():
@@ -255,12 +232,12 @@ class FFmpegController:
         """Mulai source baru. Publisher harus sudah ada atau akan dibuat."""
         # Note: self._lock is RLock, so calling _ensure_publisher is safe here
         self._ensure_publisher()
-        
+
         with self._lock:
             self._kill_source()
             print(f"Starting Source: {input_path} (seek: {seek_seconds}s)", flush=True)
             cmd = _build_source_cmd(input_path, seek_seconds, self.encoder, self.fps, loop=loop)
-            
+
             try:
                 self._source_proc = subprocess.Popen(
                     cmd,
@@ -303,11 +280,11 @@ class FFmpegController:
             with self._lock:
                 src = self._source_proc
                 pub = self._publisher_proc
-            
+
             if src and pub and src.poll() is None:
                 try:
                     # Higher buffer for smooth playback
-                    data = src.stdout.read(42112) 
+                    data = src.stdout.read(42112)
                     if data:
                         try:
                             pub.stdin.write(data)
@@ -351,7 +328,7 @@ class FFmpegController:
             self._time_pos       = 0.0
             self._paused         = False
             self._loop_file      = False
-            self._chunk_progress = 0
+
             self._start_proc(self._playlist[0])
         return {"error": None}
 
@@ -392,11 +369,6 @@ class FFmpegController:
             self._index    = None
             self._time_pos = 0.0
             self._paused   = False
-
-    def restart_process_only(self):
-        """Kill source FFmpeg tanpa bookkeeping resume."""
-        with self._lock:
-            self._kill_source()
 
     def get_playlist(self):
         """Kembalikan playlist dalam format yang kompatibel dengan MPVController."""
@@ -442,8 +414,6 @@ class FFmpegController:
                 "current_file":         current_file,
                 "playlist_index":       self._index,
                 "playlist_count":       len(self._playlist),
-                "chunk_progress":       self._chunk_progress,
-                "chunk_size":           self.chunk_size,
                 "current_time_pos":     self._time_pos,
                 "current_time_str":     format_duration(self._time_pos),
                 "current_duration_sec": self._current_duration_sec,
@@ -518,7 +488,6 @@ class FFmpegController:
                     if (self._index is not None and self._index + 1 < len(self._playlist)):
                         self._index += 1
                         self._time_pos = 0.0
-                        self._chunk_progress += 1
                         self._start_proc(self._playlist[self._index])
 
             elif action and action[0] == "loop":
