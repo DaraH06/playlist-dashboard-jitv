@@ -27,6 +27,8 @@ import threading
 import time
 from datetime import datetime
 from logger import ffmpeg_logger
+from logger import ffmpeg_stats_srcdebug as src_debug
+from logger import ffmpeg_stats_pubdebug as pub_debug
 # ---------------------------------------------------------------------------
 # Konstanta / env
 # ---------------------------------------------------------------------------
@@ -54,7 +56,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
     """Source process: read file/stream -> normalize -> mpegts -> pipe:1."""
     is_stream = input_path.startswith(("rtmp://", "srt://", "http://", "https://"))
 
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
+    cmd = ["ffmpeg", "-hide_banner", "-y"]
 
     if loop and not is_stream:
         cmd += ["-stream_loop", "-1"]
@@ -65,6 +67,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
     if is_stream:
         cmd += ["-use_wallclock_as_timestamps", "1"]
         cmd += ["-fflags", "+genpts+discardcorrupt+nobuffer", "-flags", "low_delay"]
+        cmd += ["-rw_timeout", "5000000"]
         cmd += ["-i", input_path]
     else:
         cmd += [
@@ -79,12 +82,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
     cmd += ["-vf", vf, "-r", fps]
 
     # Video encode
-    if encoder == "copy":
-        # Force encoding anyway because we need consistent MPEG-TS output for the publisher pipe
-        # "copy" is not recommended for hybrid source switching.
-        actual_encoder = "libx264"
-    else:
-        actual_encoder = encoder
+    actual_encoder = "libx264" if encoder == "copy" else encoder
 
     cmd += [
         "-c:v", actual_encoder,
@@ -92,14 +90,17 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
         "-b:v", BITRATE,
         "-maxrate", BITRATE,
         "-bufsize", str(int(BITRATE.replace('k','')) * 2) + "k",
+        "-bsf:v", "h264_mp4toannexb"
     ]
     if actual_encoder == "libx264":
         cmd += ["-preset", "veryfast"]
 
     # Audio normalization
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
-            "-af", "pan=stereo|c0=c0|c1=c1,aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
-            "-avoid_negative_ts", "make_zero"]
+    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
+
+    cmd += ["-af", "pan=stereo|c0=c0|c1=c1,aresample=async=1000:min_hard_comp=0.100000:first_pts=0"]
+
+    cmd += ["-avoid_negative_ts", "make_zero"]
 
     # Output to MPEG-TS pipe
     cmd += ["-f", "mpegts", "pipe:1"]
@@ -111,7 +112,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
 def _build_publisher_cmd(rtmp_url):
     """Publisher process: pipe:0 -> copy -> RTMP."""
     cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
+        "ffmpeg", "-hide_banner", "-y",
         "-f", "mpegts",
         "-analyzeduration", "2000000", "-probesize", "5000000",
         "-i", "pipe:0",
@@ -119,12 +120,76 @@ def _build_publisher_cmd(rtmp_url):
         "-bsf:v", "dump_extra",
         "-c:a", "copy",
         "-max_interleave_delta", "0",
-        "-fflags", "+genpts",
+        "-fflags", "+genpts+igndts",
+        "-flvflags", "no_duration_filesize",
         "-f", "flv", rtmp_url
     ]
     print(f"Publisher CMD:\n {' '.join(cmd)}", flush=True)
     return cmd
 
+
+def _read_stream_stderr(proc_ref, logger_obj, error_logger_obj, prefix="[FFmpeg]", lock=None, update_error_cb=None):
+    """
+    Membaca stderr FFmpeg secara real-time dengan memisahkan karakter '\r' (carriage return).
+    """
+    def _reader():
+        last_stat_time = 0.0
+        buffer = ""
+        
+        try:
+            # Buka stream binary dan baca per-chunk/karakter agar tahan \r
+            while True:
+                chunk = proc_ref.stderr.read(1024)
+                if not chunk:
+                    break
+                
+                text = chunk.decode('utf-8', errors='replace')
+                buffer += text
+
+                # Pecah berdasarkan \n atau \r (karena FFmpeg stat memakai \r)
+                while '\r' in buffer or '\n' in buffer:
+                    # Cari pemisah mana yang muncul duluan
+                    pos_r = buffer.find('\r')
+                    pos_n = buffer.find('\n')
+                    
+                    if pos_r != -1 and (pos_n == -1 or pos_r < pos_n):
+                        line = buffer[:pos_r]
+                        buffer = buffer[pos_r+1:]
+                    else:
+                        line = buffer[:pos_n]
+                        buffer = buffer[pos_n+1:]
+                        
+                    l = line.strip()
+                    if not l:
+                        continue
+
+                    # Filter warning yang ingin diabaikan
+                    if "Late SEI is not implemented" in l:
+                        continue
+
+                    # A. STATISTIK PERFORMA LIVE (frame= / fps=)
+                    if "frame=" in l or "fps=" in l or "speed=" in l:
+                        current_time = time.time()
+                        if current_time - last_stat_time >= 2.0:
+                            logger_obj.info(f"{prefix} {l}")
+                            last_stat_time = current_time
+                        continue
+
+                    # B. HEADER INFO INISIALISASI (Disimpan langsung tanpa rate-limit)
+                    if any(k in l.lower() for k in ["input #", "output #", "stream #", "duration:"]):
+                        logger_obj.info(f"{prefix} {l}")
+                        continue
+
+                    # C. LOG ERROR/WARNING
+                    if "error" in l.lower() or "failed" in l.lower() or "corrupt" in l.lower():
+                        error_logger_obj.error(f"{prefix} Error: {l}")
+                        if update_error_cb:
+                            update_error_cb(f"{prefix} {l}")
+
+        except Exception:
+            pass
+
+    threading.Thread(target=_reader, daemon=True).start()
 
 # ---------------------------------------------------------------------------
 # FFmpegController
@@ -179,20 +244,22 @@ class FFmpegController:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     text=False, # binary pipe
+                    bufsize=1
                 )
 
                 # Monitor publisher stderr
                 pub_ref = self._publisher_proc
-                def _read_pub_stderr():
-                    try:
-                        for line in pub_ref.stderr:
-                            l = line.decode('utf-8', errors='replace').rstrip()
-                            if "error" in l.lower():
-                                ffmpeg_logger.error(f"[FFmpeg Publisher Error] {l}")
-                                with self._lock:
-                                    self._last_error = f"[Pub] {l}"
-                    except Exception: pass
-                threading.Thread(target=_read_pub_stderr, daemon=True).start()
+                def _update_pub_error(msg):
+                    with self._lock:
+                         self._last_error = msg
+
+                _read_stream_stderr(
+                     proc_ref=pub_ref,
+                     logger_obj=pub_debug,           # Ke stats_ffmpeg_pub.log
+                     error_logger_obj=ffmpeg_logger, # Ke log_ffmpeg.log
+                     prefix="[Pub]",
+                     update_error_cb=_update_pub_error
+                 )
 
             except Exception as e:
                 ffmpeg_logger.critical(f"CRITICAL: Failed to start publisher: {e}")
@@ -244,6 +311,7 @@ class FFmpegController:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=False,
+                    bufsize=1
                 )
             except FileNotFoundError:
                 ffmpeg_logger.error("ERROR: FFmpeg command not found!")
@@ -252,17 +320,18 @@ class FFmpegController:
 
             # Monitor source stderr
             src_ref = self._source_proc
-            def _read_src_stderr():
-                try:
-                    for line in src_ref.stderr:
-                        l = line.decode('utf-8', errors='replace').rstrip()
-                        if "error" in l.lower() or "failed" in l.lower():
-                            ffmpeg_logger.error(f"[FFmpeg Source Error] {l}")
-                            with self._lock:
-                                if self._source_proc is src_ref:
-                                    self._last_error = f"[Src] {l}"
-                except Exception: pass
-            threading.Thread(target=_read_src_stderr, daemon=True).start()
+            def _update_src_error(msg):
+                with self._lock:
+                    if self._source_proc is src_ref:
+                       self._last_error = msg
+
+            _read_stream_stderr(
+                 proc_ref=src_ref,
+                 logger_obj=src_debug,           # Ke stats_ffmpeg_src.log
+                 error_logger_obj=ffmpeg_logger, # Ke log_ffmpeg.log
+                 prefix="[Source]",
+                 update_error_cb=_update_src_error
+            )
 
             # Start bridge thread if not running
             if self._bridge_thread is None or not self._bridge_thread.is_alive():

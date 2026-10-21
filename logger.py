@@ -36,7 +36,8 @@ def setup_logger(name, log_file, max_bytes=1 * 1024 * 1024):
 
 scheduler_logger = setup_logger("scheduler", "log_scheduler.log")
 ffmpeg_logger = setup_logger("ffmpeg", "log_ffmpeg.log")
-ffmpeg_stats_debug = setup_logger("ffmpeg_stats", "stats_ffmpeg")
+ffmpeg_stats_pubdebug = setup_logger("ffmpeg_stats_pub", "stats_ffmpeg_pub.log")
+ffmpeg_stats_srcdebug = setup_logger("ffmpeg_stats_src", "stats_ffmpeg_src.log")
 mpv_logger = setup_logger("mpv", "log_mpv.log")
 hasil_video = setup_logger("video", "scan_video.log")
 hasil_audio = setup_logger("audio", "scan_audio.log")
