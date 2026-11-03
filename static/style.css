@@ -222,6 +222,7 @@ header h1 { font-size: 18px; margin: 0; }
   overflow: hidden;
 }
 .panel h2 { font-size: 14px; margin: 0 0 12px; color: var(--text-dim); }
+.library-panel h2 { margin-bottom: 4px; }
 
 .breadcrumb {
   font-size: 12px;
@@ -278,7 +279,95 @@ header h1 { font-size: 18px; margin: 0; }
 .folder-name { color: var(--text); font-weight: 500; }
 .now-playing { color: var(--accent); font-weight: 600; }
 
-/* Queue panel: played / playing / upcoming cards */
+/* Pustaka Video Tree (style Figma) */
+.library-tree,
+.tree-children {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.library-tree {
+  max-height: 400px;
+  overflow: auto;
+  padding: 0;
+  background: transparent;
+  color: #fff;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.tree-children {
+  padding-left: 28px;
+}
+.tree-node {
+  display: block;
+  width: 100%;
+}
+.tree-row {
+  display: grid;
+  grid-template-columns: 20px 20px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  min-height: 28px;
+  padding-right: 6px;
+}
+.tree-row.selected {
+  background: #292929;
+  color: #fff;
+}
+.tree-toggle,
+.tree-label {
+  border: 0;
+  color: #fff;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.tree-toggle {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+}
+.tree-toggle img {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+.tree-toggle:hover,
+.tree-label:hover { background: #202020; }
+.tree-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+.tree-icon img {
+  display: block;
+  transform: scale(.8333);
+}
+.tree-label {
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 0;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 15px;
+}
+.tree-message {
+  padding: 8px 0;
+  color: #fff;
+  font-size: 12px;
+  list-style: none;
+}
+
+/* Panel Antrian: Sudah Diputar / Sedang Diputar / Berikutnya */
 .queue-panel {
   padding: 0 24px 24px;
   width: 100%;
@@ -333,7 +422,7 @@ header h1 { font-size: 18px; margin: 0; }
   font-weight: 600;
 }
 
-/* Now-playing progress bar */
+/* Progress Bar Sedang Diputar */
 .now-playing-timer {
   margin-top: 10px;
 }
@@ -358,14 +447,14 @@ header h1 { font-size: 18px; margin: 0; }
   text-align: right;
 }
 
-/* ---------- Button group per row ---------- */
+/* ---------- Grup Tombol per Baris ---------- */
 .btn-group {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
 }
 
-/* ---------- Fallback video panel ---------- */
+/* ---------- Panel Video Fallback ---------- */
 .fallback-panel {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -398,7 +487,7 @@ header h1 { font-size: 18px; margin: 0; }
 }
 .fallback-actions button:hover { background: #1d4ed8; }
 
-/* Danger (remove) button */
+/* Tombol Bahaya (Hapus) */
 button.btn-danger {
   background: rgba(224, 90, 90, 0.12);
   color: var(--danger);
@@ -408,7 +497,7 @@ button.btn-danger:hover {
   background: rgba(224, 90, 90, 0.25);
 }
 
-/* ---------- Modal Dialogs ---------- */
+/* ---------- Modal Dialog ---------- */
 .modal-overlay {
   display: none;
   position: fixed;
@@ -508,7 +597,7 @@ button.btn-danger:hover {
 .rundown-table .col-dur    { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text-dim); }
 .rundown-table .col-status { white-space: nowrap; }
 
-/* Status badges */
+/* Badge Status */
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -520,7 +609,7 @@ button.btn-danger:hover {
 .badge-missing { background: rgba(224, 90, 90, 0.18); color: #e05a5a; }
 .badge-live    { background: rgba(33, 150, 243, 0.18); color: #64b5f6; }
 
-/* Picker modal body */
+/* Body Modal Picker */
 .picker-body {
   max-height: 55vh;
   overflow-y: auto;
@@ -528,7 +617,7 @@ button.btn-danger:hover {
 }
 
 /* ============================================================
-   RESPONSIVE BREAKPOINTS (Desktop, Tablet, Mobile)
+   BREAKPOINT RESPONSIF (Desktop, Tablet, Mobile)
    ============================================================ */
 
 @media (max-width: 1024px) {

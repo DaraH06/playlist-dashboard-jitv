@@ -1,11 +1,8 @@
-let currentBrowsePath = ""; // folder currently shown in the library panel
+let currentBrowsePath = "";
+const browseCache = new Map();
+const browseErrors = new Map();
+const expandedFolders = new Set();
 
-// Client-side timer smoothing state: we only get fresh elapsed/duration
-// numbers from the server every 3s (poll interval), which looks jumpy.
-// Instead we remember the last known position + when we learned it, and
-// tick the on-screen display every 1s by extrapolating locally. Each new
-// poll re-syncs the baseline, so drift never accumulates for more than
-// one poll interval.
 let timerBaseline = { elapsedSec: null, durationSec: null, atMs: null, paused: true };
 
 async function api(path, options = {}) {
@@ -20,73 +17,171 @@ function displayName(relPath) {
   return relPath.split("/").pop();
 }
 
-// ---------- Library browser (folders + files) ----------
+// ---------- Pustaka Video Utama (Folder Tree Figma-style) ----------
 
-function renderBreadcrumb(crumbs) {
-  const nav = document.getElementById("breadcrumb");
-  nav.innerHTML = "";
+async function loadBrowseFolder(path) {
+  if (browseCache.has(path)) return browseCache.get(path);
+  const data = await api("/api/browse?path=" + encodeURIComponent(path));
+  if (data.error) throw new Error(data.error);
+  browseCache.set(path, data);
+  return data;
+}
 
-  const root = document.createElement("a");
-  root.textContent = "Semua Video";
-  root.href = "#";
-  root.onclick = (e) => { e.preventDefault(); browseTo(""); };
-  nav.appendChild(root);
+function renderLibraryTree() {
+  const tree = document.getElementById("browse-list");
+  tree.innerHTML = "";
+  const rootData = browseCache.get("");
+  if (browseErrors.has("")) {
+    tree.appendChild(makeTreeMessage(`Tidak dapat membaca pustaka: ${browseErrors.get("")}`));
+  } else if (!rootData) {
+    tree.appendChild(makeTreeMessage("Memuat pustaka…"));
+  } else {
+    appendFolderContents(tree, rootData);
+    if (!rootData.folders.length && !rootData.files.length) {
+      tree.appendChild(makeTreeMessage("Pustaka kosong"));
+    }
+  }
+}
 
-  crumbs.forEach((c) => {
-    nav.appendChild(document.createTextNode(" / "));
-    const a = document.createElement("a");
-    a.textContent = c.name;
-    a.href = "#";
-    a.onclick = (e) => { e.preventDefault(); browseTo(c.path); };
-    nav.appendChild(a);
+function renderFolderNode(folder) {
+  const li = document.createElement("li");
+  li.className = "tree-node";
+  const row = document.createElement("div");
+  row.className = `tree-row${currentBrowsePath === folder.path ? " selected" : ""}`;
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  row.setAttribute("aria-label", `${expandedFolders.has(folder.path) ? "Collapse" : "Expand"} ${folder.name}`);
+  row.onclick = () => toggleFolder(folder.path);
+  row.onkeydown = (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleFolder(folder.path);
+    }
+  };
+  const isExpanded = expandedFolders.has(folder.path);
+  row.append(
+    makeTreeToggle(folder.path, isExpanded),
+    makeTreeIcon("folder", "/static/assets/folder.svg", "Folder"),
+    makeTreeLabel(folder.path, folder.name)
+  );
+  li.appendChild(row);
+  if (isExpanded) {
+    const children = document.createElement("ul");
+    children.className = "tree-children";
+    const data = browseCache.get(folder.path);
+    if (browseErrors.has(folder.path)) children.appendChild(makeTreeMessage(`Error: ${browseErrors.get(folder.path)}`));
+    else if (!data) children.appendChild(makeTreeMessage("Memuat folder…"));
+    else if (!data.folders.length && !data.files.length) children.appendChild(makeTreeMessage("(Folder kosong)"));
+    else appendFolderContents(children, data);
+    li.appendChild(children);
+  }
+  return li;
+}
+
+function appendFolderContents(list, data) {
+  const entries = [
+    ...data.folders.map(folder => ({ ...folder, kind: "folder" })),
+    ...data.files.map(file => ({ ...file, kind: "video" })),
+  ].sort((a, b) => Number(b.kind === "folder") - Number(a.kind === "folder")
+    || a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+
+  entries.forEach(entry => {
+    if (entry.kind === "folder") {
+      list.appendChild(renderFolderNode(entry));
+      return;
+    }
+    const li = document.createElement("li");
+    li.className = "tree-node";
+    const row = document.createElement("div");
+    row.className = `tree-row tree-file-row${currentBrowsePath === entry.path ? " selected" : ""}`;
+    row.append(
+      makeTreeSpacer(),
+      makeTreeIcon("video", "/static/assets/video.svg", "Video"),
+      makeTreeLabel(entry.path, entry.name)
+    );
+    li.appendChild(row);
+    list.appendChild(li);
   });
 }
 
-function renderBrowseList(data) {
-  const ul = document.getElementById("browse-list");
-  ul.innerHTML = "";
+function makeTreeToggle(path, isExpanded) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "tree-toggle";
+  const icon = document.createElement("img");
+  icon.src = isExpanded ? "/static/assets/minus.svg" : "/static/assets/plus.svg";
+  icon.alt = "";
+  button.appendChild(icon);
+  button.setAttribute("aria-label", `${isExpanded ? "Collapse" : "Expand"} ${path || "Video Library"}`);
+  button.setAttribute("aria-expanded", String(isExpanded));
+  button.onclick = (event) => { event.stopPropagation(); toggleFolder(path); };
+  return button;
+}
 
-  if (data.folders.length === 0 && data.files.length === 0) {
-    ul.innerHTML = "<li>Folder ini kosong</li>";
+function makeTreeSpacer() {
+  const spacer = document.createElement("span");
+  spacer.className = "tree-spacer";
+  spacer.setAttribute("aria-hidden", "true");
+  return spacer;
+}
+
+function makeTreeIcon(kind, src, alt) {
+  const wrapper = document.createElement("span");
+  wrapper.className = `tree-icon tree-icon-${kind}`;
+  const icon = document.createElement("img");
+  icon.src = src;
+  icon.alt = alt;
+  wrapper.appendChild(icon);
+  return wrapper;
+}
+
+function makeTreeLabel(path, label) {
+  const text = document.createElement("span");
+  text.className = "tree-label";
+  text.textContent = label;
+  return text;
+}
+
+function makeTreeMessage(message) {
+  const li = document.createElement("li");
+  li.className = "tree-message";
+  li.textContent = message;
+  return li;
+}
+
+async function toggleFolder(path) {
+  currentBrowsePath = path;
+  if (expandedFolders.has(path)) {
+    expandedFolders.delete(path);
+    renderLibraryTree();
     return;
   }
-
-  data.folders.forEach((folder) => {
-    const li = document.createElement("li");
-    const span = document.createElement("span");
-    span.className = "file-name folder-name";
-    span.textContent = "📁 " + folder.name;
-    const btn = document.createElement("button");
-    btn.textContent = "Buka";
-    btn.onclick = () => browseTo(folder.path);
-    li.append(span, btn);
-    ul.appendChild(li);
-  });
-
-  data.files.forEach((file) => {
-    const li = document.createElement("li");
-    const span = document.createElement("span");
-    span.className = "file-name";
-    span.textContent = file.name;
-    li.appendChild(span);
-    ul.appendChild(li);
-  });
+  expandedFolders.add(path);
+  renderLibraryTree();
+  try {
+    await loadBrowseFolder(path);
+    browseErrors.delete(path);
+    renderLibraryTree();
+  } catch (error) {
+    browseErrors.set(path, error.message);
+    renderLibraryTree();
+  }
 }
 
 async function browseTo(path) {
-  currentBrowsePath = path;
-  const data = await api("/api/browse?path=" + encodeURIComponent(path));
-  if (data.error) {
-    alert("Tidak bisa membuka folder ini: " + data.error);
-    return;
+  try {
+    await loadBrowseFolder(path);
+    browseErrors.delete(path);
+    if (path) expandedFolders.add(path);
+    currentBrowsePath = path;
+    renderLibraryTree();
+  } catch (error) {
+    browseErrors.set(path, error.message);
+    renderLibraryTree();
   }
-  renderBreadcrumb(data.crumbs);
-  renderBrowseList(data);
 }
 
-
-
-// ---------- Live player status: played / playing / upcoming ----------
+// ---------- Status Player: Sudah Diputar / Sedang Diputar / Berikutnya ----------
 
 function renderQueueList(elementId, items, emptyLabel) {
   const ul = document.getElementById(elementId);
@@ -110,7 +205,6 @@ function renderNowPlayingTimer(s) {
     return;
   }
 
-  // Re-sync the baseline to the authoritative value from the server.
   timerBaseline = {
     elapsedSec: s.current_time_pos || 0,
     durationSec: s.current_duration_sec || 0,
@@ -161,8 +255,6 @@ function formatSeconds(seconds) {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-// Local 1-second ticker — keeps the bar/label moving smoothly between
-// the (slower) 3-second status polls, instead of visibly jumping.
 setInterval(tickTimerDisplay, 1000);
 
 async function pollStatus() {
@@ -186,9 +278,6 @@ async function pollStatus() {
   text.textContent = `${state} — ${file} (${(s.playlist_index ?? 0) + 1}/${s.playlist_count ?? 0})`;
 
   if (s.precision_timeline) {
-    // Mode Presisi: mpv cuma pernah dimuati satu file per saat, jadi
-    // daftar sudah-diputar/berikutnya diambil dari jadwal presisi,
-    // bukan dari playlist bawaan mpv (yang selalu kosong/habis di sini).
     const t = s.precision_timeline;
     renderQueueList("queue-played", t.played, "Belum ada video yang diputar");
     renderQueueList("queue-playing", t.playing, "Tidak ada yang sedang diputar");
@@ -205,7 +294,7 @@ async function pollStatus() {
   renderNowPlayingTimer(s);
 }
 
-// ---------- Named playlists (for scheduling) ----------
+// ---------- Playlist Bernama (untuk Penjadwalan) ----------
 
 async function loadNamedPlaylists() {
   const playlists = await api("/api/named-playlists");
@@ -244,11 +333,9 @@ async function loadNamedPlaylists() {
   }
 }
 
-// ---------- Rundown Modal ----------
+// ---------- Modal Rundown ----------
 
 function _secondsToClockWIB(totalSeconds) {
-  // Jam tayang di file playlist bisa >= 24 (jadwal melewati tengah malam).
-  // Tampilkan apa adanya (tanpa bungkus ke 0) supaya operator tahu jam persisnya.
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = Math.floor(totalSeconds % 60);
@@ -273,7 +360,6 @@ async function openRundown(dateName) {
   }
   const entries = await res.json();
 
-  // Hitung statistik ringkasan
   let countVideo = 0, countMissing = 0, countLive = 0, totalDurSec = 0;
   entries.forEach(e => {
     totalDurSec += e.duration || 0;
@@ -290,7 +376,6 @@ async function openRundown(dateName) {
     (countMissing ? `<span style="color:#e05a5a">🔴 ${countMissing} missing</span>` : "") +
     (countLive    ? `<span style="color:#64b5f6">📡 ${countLive} live</span>` : "");
 
-  // Render baris tabel
   entries.forEach(e => {
     const tr = document.createElement("tr");
     if (e.type === "missing") tr.className = "row-missing";
@@ -304,7 +389,6 @@ async function openRundown(dateName) {
     else
       badgeHtml = `<span class="badge badge-live">📡 Live</span>`;
 
-    // Label: untuk segmen live, potong URL SRT agar tidak terlalu panjang
     const rawLabel = e.label || "-";
     const displayLabel = e.type === "live"
       ? `Relay CCTV (${rawLabel.length > 40 ? rawLabel.slice(0, 40) + "…" : rawLabel})`
@@ -323,16 +407,19 @@ function closeRundown() {
   document.getElementById("rundown-modal").classList.remove("open");
 }
 
-// Tutup modal: tombol ✕, klik di luar kotak, tombol Escape
 document.getElementById("btn-close-rundown").onclick = closeRundown;
 document.getElementById("rundown-modal").addEventListener("click", (e) => {
   if (e.target === document.getElementById("rundown-modal")) closeRundown();
 });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeRundown();
+});
 
 
+// Import playlist handling
 
-document.getElementById("btn-import-zip").onclick = async () => {
-  const input = document.getElementById("import-zip-input");
+const input = document.getElementById("import-zip-input");
+input.addEventListener("change", async () => {
   const note = document.getElementById("import-zip-note");
 
   if (!input.files || input.files.length === 0) {
@@ -373,7 +460,7 @@ document.getElementById("btn-import-zip").onclick = async () => {
     ? "chunk-size-saved-note error" : "chunk-size-saved-note ok";
 
   loadNamedPlaylists();
-};
+});
 
 // ---------- Mode Jadwal Presisi ----------
 
@@ -422,10 +509,10 @@ setInterval(pollStatus, 3000);
 setInterval(loadPrecisionStatus, 3000);
 
 
-// ---------- Fallback Video Manager ----------
+// ---------- Manajer Video Fallback ----------
 
-let _fallbackList = [];  // current saved list (rel paths)
-let _pickerPath = "";    // current browse path inside the picker modal
+let _fallbackList = [];  // daftar tersimpan (path relatif)
+let _pickerPath = "";    // path browse saat ini di modal picker
 
 async function loadFallbackVideos() {
   _fallbackList = await api("/api/fallback-videos");
@@ -479,7 +566,6 @@ async function pickerBrowseTo(path) {
   const data = await api("/api/browse?path=" + encodeURIComponent(path));
   if (data.error) { alert("Error: " + data.error); return; }
 
-  // Breadcrumb
   const nav = document.getElementById("fallback-picker-breadcrumb");
   nav.innerHTML = "";
   const rootA = document.createElement("a");
@@ -496,7 +582,6 @@ async function pickerBrowseTo(path) {
     nav.appendChild(a);
   });
 
-  // List
   const ul = document.getElementById("fallback-picker-list");
   ul.innerHTML = "";
   if (data.folders.length === 0 && data.files.length === 0) {
@@ -549,6 +634,5 @@ document.getElementById("fallback-picker-modal").addEventListener("click", (e) =
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeFallbackPicker();
-    closeRundown();
   }
 });
