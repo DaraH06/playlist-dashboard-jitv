@@ -13,3 +13,17 @@ services:
       - /mnt/videoserver:/mnt/videoserver
       - .:/app
     restart: always
+    depends_on:
+      - mediamtx
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: media
+    ports:
+      - "8554:8554" # RTSP
+      - "1935:1935" # RTMP
+      - "8888:8888" # HLS
+      - "8889:8889" # WebRTC / WHEP
+      - "9997:9997" # API
+      - "8890:8890" # SRT
+    restart: unless-stopped

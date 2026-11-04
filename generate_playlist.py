@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 from datetime import date, datetime
-from logger import hasil_video, hasil_audio
+# from logger import hasil_video, hasil_audio
 
 
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".ts", ".m4v")
@@ -67,11 +67,11 @@ def scan_videos(video_dir):
                 relative = os.path.relpath(full_path, video_dir)
                 videos.append((full_path, relative.replace(os.sep, "/")))
     return videos
-
+"""
 def getSpesification(path, ffprobe):
-    """
+
     ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels -of csv=p=0 "$f"
-    """
+    
     result = subprocess.run(
         [
             ffprobe,
@@ -100,26 +100,27 @@ def getSpesification(path, ffprobe):
         check=False,
     )
     hasil_audio.info(f'path : {path} :\n\t {y.stdout.strip()}')
+"""
 
-
-def build_playlist(video_dir, start_seconds, fps, ffprobe):
+def build_playlist(video_dir, start_seconds, fps, ffprobe, loop_count=1):
     videos = scan_videos(video_dir)
     if not videos:
         raise RuntimeError(f"Tidak ada video didukung di: {video_dir}")
 
     rows = []
     current = float(start_seconds)
-    for full_path, relative_path in videos:
-        duration = probe_video_duration(full_path, ffprobe)
-        rows.append(
-            (
-                seconds_to_timecode(current, fps),
-                seconds_to_timecode(duration, fps),
-                f"UTF8{relative_path}",
+    for _ in range(loop_count):
+        for full_path, relative_path in videos:
+            duration = probe_video_duration(full_path, ffprobe)
+            rows.append(
+                (
+                    seconds_to_timecode(current, fps),
+                    seconds_to_timecode(duration, fps),
+                    f"UTF8{relative_path}",
+                )
             )
-        )
-        current += duration
-    return
+            current += duration
+    return rows
 
 
 def main():
@@ -144,6 +145,12 @@ def main():
     )
     parser.add_argument("--fps", type=int, default=25, choices=(25, 30))
     parser.add_argument("--ffprobe", default="ffprobe", help="Path executable ffprobe")
+    parser.add_argument(
+        "--loop-count",
+        type=int,
+        default=1,
+        help="Jumlah kali mengulang playlist (default: 1, tanpa loop)",
+    )
     args = parser.parse_args()
 
     video_dir = os.path.abspath(args.video_dir)
@@ -152,7 +159,7 @@ def main():
     output = args.output or f"{args.date}.playlist"
 
     try:
-        rows = build_playlist(video_dir, args.start_time, args.fps, args.ffprobe)
+        rows = build_playlist(video_dir, args.start_time, args.fps, args.ffprobe, args.loop_count)
     except FileNotFoundError:
         print(
             "ffprobe tidak ditemukan. Install FFmpeg dan tambahkan folder bin ke PATH.",
