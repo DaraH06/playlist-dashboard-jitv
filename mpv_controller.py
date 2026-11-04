@@ -10,7 +10,7 @@ from logger import mpv_logger
 MPV_SOCKET = "/tmp/mpvsocket"
 # Real mount point used on this Pi (see README). Override with the
 # DASHBOARD_VIDEO_ROOT env var if you deploy against a different path.
-VIDEO_ROOT = os.environ.get("DASHBOARD_VIDEO_ROOT", "/mnt/videoserver")
+VIDEO_ROOT = os.environ.get("VIDEO_ROOT", "/mnt/videoserver")
 ALLOWED_EXT = (".mp4", ".mkv", ".avi", ".mov", ".ts", ".m4v")
 
 M3U_PATH = "/tmp/dashboard_playlist.m3u"
@@ -409,13 +409,14 @@ class MockMPVController:
             self._paused   = True
 
 def make_controller():
+
     """Pilih controller yang tepat berdasarkan environment:
 
-    DASHBOARD_PLAYER=ffmpeg  → FFmpegController (publish ke RTMP)
-    DASHBOARD_PLAYER=mpv     → MPVController / MockMPVController (existing)
-    (tidak diset)            → behaviour lama: mock di Windows, MPV di Linux
+    MEDIA_PLAYER=ffmpeg  → FFmpegController (publish ke RTMP)
+    MEDIA_PLAYER=mpv     → MPVController / MockMPVController (existing)
+    (tidak diset)        → behaviour lama: mock di Windows, MPV di Linux
     """
-    player = os.environ.get("DASHBOARD_PLAYER", "").lower()
+    player = os.environ.get("MEDIA_PLAYER", "").lower()
 
     if player == "ffmpeg":
         rtmp_url = os.environ.get("RTMP_TARGET", "")
@@ -424,12 +425,12 @@ def make_controller():
                 "DASHBOARD_PLAYER=ffmpeg tapi RTMP_TARGET tidak diset. "
                 "Set RTMP_TARGET ke URL RTMP tujuan (mis. rtmp://127.0.0.1:1935/live/jitv)."
             )
-        encoder = os.environ.get("DASHBOARD_ENCODER", "libx264")
-        fps     = os.environ.get("DASHBOARD_FPS", "25")
-        print(f"[dashboard] backend  : ffmpeg")
-        print(f"[dashboard] encoder  : {encoder}")
-        print(f"[dashboard] rtmp     : {rtmp_url}")
-        print(f"[dashboard] fps      : {fps}")
+        encoder = os.environ.get("ENCODER", "libx264")
+        fps     = os.environ.get("FPS", "25")
+        print(f"[dashboard] backend  : ffmpeg", flush=True)
+        print(f"[dashboard] encoder  : {encoder}", flush=True)
+        print(f"[dashboard] rtmp     : {rtmp_url}", flush=True)
+        print(f"[dashboard] fps      : {fps}", flush=True)
         # Import di sini untuk menghindari circular import saat mpv_controller
         # di-import oleh ffmpeg_controller itu sendiri.
         from ffmpeg_controller import FFmpegController

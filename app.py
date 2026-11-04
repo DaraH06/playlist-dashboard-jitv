@@ -1,6 +1,4 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
 import json
 import zipfile
 import io
@@ -22,14 +20,13 @@ ADMIN_PASSWORD_HASH = os.environ.get(
     generate_password_hash("changeme123"),
 )
 
+print(f"user : {ADMIN_USERNAME}", flush=True)
+print(f"pass : {ADMIN_PASSWORD_HASH}", flush=True)
+
 PLAYLIST_FILE = os.path.join(os.path.dirname(__file__), "playlist.json")
 FALLBACK_FILE = os.path.join(os.path.dirname(__file__), "fallback_videos.json")
 
-# make_controller() otomatis memilih MockMPVController di Windows (dev)
-# dan MPVController asli di Raspberry Pi (produksi) — tidak perlu edit manual.
 mpv = make_controller()
-
-
 
 def resolve_playlist_paths(items):
     """Turn a list of relative paths into full paths, silently

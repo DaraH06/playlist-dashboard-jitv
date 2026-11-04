@@ -34,11 +34,13 @@ from logger import ffmpeg_stats_pubdebug as pub_debug
 # ---------------------------------------------------------------------------
 
 RTMP_URL     = os.environ.get("RTMP_TARGET", "")
-ENCODER      = os.environ.get("DASHBOARD_ENCODER", "libx264")
-FPS          = os.environ.get("DASHBOARD_FPS", "25")
-WIDTH        = os.environ.get("DASHBOARD_WIDTH", "1920")
-HEIGHT       = os.environ.get("DASHBOARD_HEIGHT", "1080")
-BITRATE      = os.environ.get("DASHBOARD_BITRATE", "8500k")
+ENCODER      = os.environ.get("ENCODER", "libx264")
+FPS          = os.environ.get("FPS", "25")
+WIDTH        = os.environ.get("VIDEO_WIDTH", "1920")
+HEIGHT       = os.environ.get("VIDEO_HEIGHT", "1080")
+BITRATE      = os.environ.get("VIDEO_BITRATE", "8500k")
+AUDIO_SAMPLE = os.environ.get("AUDIO_SAMPLE_RATE", "48000")
+AUDIO_BITRATE= os.environ.get("AUDIO_BITRATE", "128k")
 
 # Re-use the duration formatter from mpv_controller.
 from mpv_controller import format_duration
@@ -56,7 +58,7 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
     """Source process: read file/stream -> normalize -> mpegts -> pipe:1."""
     is_stream = input_path.startswith(("rtmp://", "srt://", "http://", "https://"))
 
-    cmd = ["ffmpeg", "-hide_banner", "-y"]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
 
     if loop and not is_stream:
         cmd += ["-stream_loop", "-1"]
@@ -77,9 +79,9 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
             ]
 
     # Normalization filter: scale & pad to target resolution, fix FPS
-    vf = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
+    vf = f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,fps=fps={fps}:round=near"
 
-    cmd += ["-vf", vf, "-r", fps]
+    cmd += ["-vf", vf]
 
     # Video encode
     actual_encoder = "libx264" if encoder == "copy" else encoder
@@ -96,14 +98,12 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
         cmd += ["-preset", "veryfast"]
 
     # Audio normalization
-    cmd += ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
-
-    cmd += ["-af", "pan=stereo|c0=c0|c1=c1,aresample=async=1000:min_hard_comp=0.100000:first_pts=0"]
-
-    cmd += ["-avoid_negative_ts", "make_zero"]
+    cmd += ["-c:a", "aac", "-b:a", AUDIO_BITRATE, "-ar", AUDIO_SAMPLE, "-ac", "2",
+            "-af", "pan=stereo|c0=c0|c1=c1,aresample=async=1000:min_hard_comp=0.100000:first_pts=0",
+            "-avoid_negative_ts", "make_zero"]
 
     # Output to MPEG-TS pipe
-    cmd += ["-f", "mpegts", "pipe:1"]
+    cmd += ["-fps_mode", "cfr", "-f", "mpegts", "pipe:1"]
 
     print(f"Source CMD:\n {' '.join(cmd)}", flush=True)
     return cmd
@@ -117,11 +117,10 @@ def _build_publisher_cmd(rtmp_url):
         "-analyzeduration", "2000000", "-probesize", "5000000",
         "-i", "pipe:0",
         "-c:v", "copy",
-        "-bsf:v", "dump_extra",
+        "-bsf:v", "h264_mp4toannexb",
         "-c:a", "copy",
         "-max_interleave_delta", "0",
         "-fflags", "+genpts+igndts",
-        "-flvflags", "no_duration_filesize",
         "-f", "flv", rtmp_url
     ]
     print(f"Publisher CMD:\n {' '.join(cmd)}", flush=True)
@@ -135,14 +134,14 @@ def _read_stream_stderr(proc_ref, logger_obj, error_logger_obj, prefix="[FFmpeg]
     def _reader():
         last_stat_time = 0.0
         buffer = ""
-        
+
         try:
             # Buka stream binary dan baca per-chunk/karakter agar tahan \r
             while True:
                 chunk = proc_ref.stderr.read(1024)
                 if not chunk:
                     break
-                
+
                 text = chunk.decode('utf-8', errors='replace')
                 buffer += text
 
@@ -151,14 +150,14 @@ def _read_stream_stderr(proc_ref, logger_obj, error_logger_obj, prefix="[FFmpeg]
                     # Cari pemisah mana yang muncul duluan
                     pos_r = buffer.find('\r')
                     pos_n = buffer.find('\n')
-                    
+
                     if pos_r != -1 and (pos_n == -1 or pos_r < pos_n):
                         line = buffer[:pos_r]
                         buffer = buffer[pos_r+1:]
                     else:
                         line = buffer[:pos_n]
                         buffer = buffer[pos_n+1:]
-                        
+
                     l = line.strip()
                     if not l:
                         continue
