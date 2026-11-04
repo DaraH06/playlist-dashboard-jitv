@@ -67,7 +67,6 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
         cmd += ["-ss", str(float(seek_seconds))]
 
     if is_stream:
-        cmd += ["-use_wallclock_as_timestamps", "1"]
         cmd += ["-fflags", "+genpts+discardcorrupt+nobuffer", "-flags", "low_delay"]
         cmd += ["-rw_timeout", "5000000"]
         cmd += ["-i", input_path]
@@ -340,7 +339,7 @@ class FFmpegController:
 
     def _bridge_loop(self):
         """Jembatan data dari source.stdout ke publisher.stdin."""
-        CHUNK_ALIGN = 42112
+        CHUNK_ALIGN = os.environ.get("CHUNK_ALIGN", "42112")
 
         while not self._stop_bridge:
             src = None
@@ -352,7 +351,7 @@ class FFmpegController:
             if src and pub and src.poll() is None:
                 try:
                     # Higher buffer for smooth playback
-                    data = src.stdout.read(42112)
+                    data = src.stdout.read(int(CHUNK_ALIGN))
                     if data:
                         try:
                             pub.stdin.write(data)
