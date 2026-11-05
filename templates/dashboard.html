@@ -80,6 +80,7 @@
       <div class="import-row">
         <input type="file" id="import-zip-input" accept=".zip,.playlist,.ply,.txt" multiple>
         <button id="btn-import-zip">Impor Playlist Harian</button>
+        <a href="{{ url_for('create_playlist') }}" class="btn-create-playlist">Buat Playlist Baru</a>
       </div>
       <p class="import-hint">Bisa file .zip (isi banyak .playlist), atau langsung beberapa file .playlist/.ply/.txt
         sekaligus tanpa perlu di-zip dulu — 1 file per tanggal, format broadcast. Live CCTV &amp; timecode presisi

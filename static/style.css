@@ -181,6 +181,32 @@ header h1 {
   border-color: var(--accent);
 }
 
+.import-row .btn-create-playlist {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: #0c0c0c;
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.import-row .btn-create-playlist:hover {
+  background: var(--accent-hover);
+}
+
+.import-row .btn-create-playlist:active {
+  transform: scale(0.98);
+}
+
 .import-hint {
   font-size: 11px;
   color: var(--text-dim);
