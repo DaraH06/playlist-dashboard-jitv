@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buat Playlist Baru</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='create-frames-8') }}">
+</head>
+
+<body class="create-body">
+  <header class="create-header">
+    <div class="header-left">
+      <div class="page-title">
+        <h1>Playlist Baru</h1>
+        <p>Tarik &amp; drop video dari folder atau klik video 2x untuk menambahkan</p>
+      </div>
+      <div class="schedule-date">
+        <label for="schedule-date" class="visually-hidden">Tanggal Siaran</label>
+        <div class="date-input-wrapper">
+          <input type="date" id="schedule-date" aria-label="Tanggal siaran">
+          <button id="btn-open-date-picker" class="calendar-trigger" type="button" aria-label="Pilih tanggal">
+            <img src="{{ url_for('static', filename='assets/calendar.svg') }}" alt="" class="calendar-icon">
+          </button>
+        </div>
+        <p class="schedule-hint">Kosongkan untuk otomatis membuat jadwal hari ini</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="btn-back" class="btn btn-ghost" type="button" aria-label="Kembali ke dashboard">
+        <img src="{{ url_for('static', filename='assets/chevron-back.svg') }}" alt="" class="icon">
+        <span>Kembali</span>
+      </button>
+    </div>
+    <button id="btn-clear" class="visually-hidden" type="button" disabled aria-hidden="true" tabindex="-1">Kosongkan
+      jadwal</button>
+  </header>
+
+  <main class="create-main">
+    <!-- Panel Jadwal -->
+    <section class="panel schedule-panel" aria-label="Jadwal Playlist">
+      <div class="schedule-header">
+        <div class="schedule-info">
+          <span id="program-count" class="program-count">0 Program</span>
+          <span id="total-duration" class="total-duration">Total Siaran: 00:00:00</span>
+        </div>
+        <div class="schedule-start-time">
+          <label for="start-time-input" class="visually-hidden">Jam Mulai</label>
+          <div class="input-with-label">
+            <span class="start-time-label">Jam Mulai:</span>
+            <input type="time" id="start-time-input" value="08:00:00" step="1" aria-label="Jam mulai siaran">
+          </div>
+        </div>
+        <span class="schedule-hint start-time-hint">Kosongkan untuk default</span>
+      </div>
+
+      <div class="schedule-toolbar">
+        <p class="library-instruction">Tarik video dari pustaka (kanan) atau klik 2x untuk menambahkan ke jadwal</p>
+        <div class="toolbar-actions">
+          <button id="btn-add-break" class="btn btn-ghost btn-sm" type="button" disabled>
+            <span>+ Istirahat</span>
+          </button>
+          <button id="btn-add-live" class="btn btn-ghost btn-sm" type="button" disabled>
+            <span>+ Live CCTV</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="schedule-table-wrapper" id="schedule-table-wrapper">
+        <p class="reorder-hint" id="reorder-hint">Klik anak panah untuk mengubah urutan</p>
+        <table class="schedule-table" id="schedule-table" role="grid" aria-label="Daftar program siaran">
+          <thead>
+            <tr>
+              <th class="col-time" scope="col">Jam Tayang (WIB)</th>
+              <th class="col-program" scope="col">Program/Acara</th>
+              <th class="col-duration" scope="col">Durasi</th>
+              <th class="col-type visual-only" scope="col">Tipe</th>
+              <th class="col-actions" scope="col" aria-label="Aksi"></th>
+            </tr>
+          </thead>
+          <tbody id="schedule-body">
+            <tr class="empty-row">
+              <td colspan="5" class="empty-message">
+                <span class="empty-video-icon" aria-hidden="true"><img
+                    src="{{ url_for('static', filename='assets/video.svg') }}" alt="" class="empty-icon"></span>
+                <div class="empty-copy">
+                  <span>Belum ada video</span>
+                  <p>Tarik &amp; drop video dari folder<br>atau klik video 2x untuk menambahkan</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Panel Library Video -->
+    <section class="panel library-panel" aria-label="Pustaka Video">
+      <div class="library-header">
+        <h2>Pustaka Video</h2>
+        <div id="library-path" class="library-path">
+          <span class="path-segment" data-path="">Semua Video</span>
+        </div>
+      </div>
+      <ul id="browse-list" class="library-tree" aria-label="Pustaka Video" role="tree">
+        <li class="tree-message">Memuat pustaka…</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="create-footer">
+    <div class="footer-info" aria-hidden="true">
+      <span id="footer-count" class="footer-stat">0 program</span>
+      <span id="footer-duration" class="footer-stat">00:00:00 total</span>
+    </div>
+    <button id="btn-save" class="btn btn-primary" type="button" disabled>
+      <img src="{{ url_for('static', filename='assets/save.svg') }}" alt="" class="icon">
+      <span>Simpan</span>
+    </button>
+  </footer>
+
+  <!-- Modal Konfirmasi Simpan -->
+  <div id="save-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="save-modal-title">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="save-modal-title">Simpan Playlist</h3>
+        <button class="modal-close" id="btn-close-save-modal" aria-label="Tutup">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="save-form">
+          <div class="form-group">
+            <label for="playlist-name">Nama Playlist (format: yyyy-mm-dd)</label>
+            <input type="text" id="playlist-name" placeholder="2025-01-15" pattern="\d{4}-\d{2}-\d{2}" required
+              aria-describedby="name-hint">
+            <p id="name-hint" class="form-hint">Nama file akan digunakan untuk penjadwalan harian</p>
+          </div>
+          <div class="form-group">
+            <label for="playlist-description">Deskripsi (opsional)</label>
+            <textarea id="playlist-description" rows="3" placeholder="Deskripsi playlist..."
+              aria-describedby="desc-hint"></textarea>
+            <p id="desc-hint" class="form-hint">Informasi tambahan untuk referensi</p>
+          </div>
+          <div class="form-preview">
+            <span class="preview-label">Pratinjau:</span>
+            <code id="preview-path" class="preview-path">/playlists/2025-01-15.playlist</code>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-save" class="btn btn-secondary" type="button">Batal</button>
+        <button id="btn-confirm-save" class="btn btn-primary" type="button">Simpan Playlist</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="{{ url_for('static', filename='app.js', v='create-tree-6') }}"></script>
+</body>
+
+</html>

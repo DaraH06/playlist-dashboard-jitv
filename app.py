@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 load_dotenv()
 import json
@@ -255,6 +256,67 @@ def api_list_named_playlists():
     return jsonify(precision.list_playlists())
 
 
+@app.route("/api/named-playlists", methods=["POST"])
+@login_required
+def api_create_named_playlist():
+    data = request.json
+    if not data:
+        return jsonify({"error": "Invalid request"}), 400
+
+    name = data.get('name', '').strip()
+    description = data.get('description', '').strip()
+    items = data.get('items', [])
+
+    if not name:
+        return jsonify({"error": "Nama playlist wajib diisi"}), 400
+
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', name):
+        return jsonify({"error": "Format nama harus yyyy-mm-dd"}), 400
+
+    if not items:
+        return jsonify({"error": "Playlist tidak boleh kosong"}), 400
+
+    # Convert to precision playlist format
+    precision_entries = []
+    for item in items:
+        entry_type = item.get('type', 'video')
+        if entry_type == 'video':
+            precision_entries.append({
+                'start': time_to_seconds(item.get('start_time', '00:00:00')),
+                'duration': item.get('duration', 0),
+                'label': item.get('name', ''),
+                'path': item.get('path', ''),
+                'type': 'video'
+            })
+        elif entry_type == 'break':
+            precision_entries.append({
+                'start': time_to_seconds(item.get('start_time', '00:00:00')),
+                'duration': item.get('duration', 0),
+                'label': 'Istirahat',
+                'type': 'break'
+            })
+        elif entry_type == 'live':
+            precision_entries.append({
+                'start': time_to_seconds(item.get('start_time', '00:00:00')),
+                'duration': item.get('duration', 0),
+                'label': item.get('name', 'Live CCTV'),
+                'type': 'live'
+            })
+
+    saved_name = precision.save_playlist(name, precision_entries)
+    return jsonify({"status": "ok", "name": saved_name})
+
+
+def time_to_seconds(time_str):
+    """Convert HH:MM:SS to total seconds."""
+    parts = time_str.split(':')
+    if len(parts) == 3:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    elif len(parts) == 2:
+        return int(parts[0]) * 60 + int(parts[1])
+    return 0
+
+
 @app.route("/api/named-playlists/<name>", methods=["DELETE"])
 @login_required
 def api_delete_named_playlist(name):
@@ -422,6 +484,13 @@ def api_precision_playlist_detail(date_name):
     if entries is None:
         return jsonify({"error": "Jadwal tidak ditemukan"}), 404
     return jsonify(entries)
+
+# ---------- Create Playlist ----------
+
+@app.route("/create-playlist")
+@login_required
+def create_playlist():
+    return render_template("create.html")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, threaded=True)
