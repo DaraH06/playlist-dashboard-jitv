@@ -662,6 +662,7 @@ if (!document.body.classList.contains("create-body")) {
 
 let scheduleItems = [];
 let draggedItem = null;
+const addingVideoPaths = new Set();
 
 function initCreatePage() {
   if (!document.body.classList.contains('create-body')) return;
@@ -689,7 +690,7 @@ function setupEventListeners() {
       scheduleItems = [];
       updateScheduleUI();
       updateFooter();
-      showToast('Jadwal dikosongkan', 'info');
+      setCreateMessage('Jadwal dikosongkan.');
     }
   });
 
@@ -738,29 +739,63 @@ function setupEventListeners() {
   });
 }
 
-function addVideoToSchedule(video) {
+async function addVideoToSchedule(video) {
   if (scheduleItems.some(item => item.path === video.path)) {
-    showToast('Video sudah ada di jadwal', 'warning');
+    setCreateMessage('Video sudah ada di jadwal.', 'warning');
     return;
   }
+  if (addingVideoPaths.has(video.path)) return;
 
-  const startTime = getNextStartTime();
-  const duration = video.duration || 0;
-
+  addingVideoPaths.add(video.path);
   const item = {
     id: Date.now() + Math.random(),
     path: video.path,
     name: video.name,
-    duration: duration,
+    duration: null,
+    durationError: false,
+    durationLoading: true,
     type: 'video',
-    startTime: startTime
+    startTime: getNextStartTime()
   };
-
   scheduleItems.push(item);
   recalculateTimes();
   updateScheduleUI();
   updateFooter();
-  showToast(`Ditambahkan: ${video.name}`, 'success');
+  setCreateMessage(`Membaca durasi video “${video.name}”…`);
+  try {
+    const result = await api('/api/video-duration', {
+      method: 'POST',
+      body: JSON.stringify({ path: video.path })
+    });
+    if (result.error || !Number.isFinite(result.duration) || result.duration <= 0) {
+      item.durationError = true;
+    } else {
+      item.duration = result.duration;
+    }
+  } catch (error) {
+    item.durationError = true;
+  } finally {
+    addingVideoPaths.delete(video.path);
+  }
+  if (!scheduleItems.includes(item)) return;
+  item.durationLoading = false;
+  recalculateTimes();
+  updateScheduleUI();
+  updateFooter();
+  setCreateMessage(item.durationError
+    ? `Durasi ${video.name} tidak terbaca. Isi durasi secara manual.`
+    : `Video ditambahkan: ${video.name}.`, item.durationError ? 'warning' : 'success');
+}
+
+function parseDurationInput(value) {
+  const match = /^(\d{2,}):(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  if (minutes > 59 || seconds > 59) return null;
+  const total = hours * 3600 + minutes * 60 + seconds;
+  return Number.isSafeInteger(total) && total > 0 ? total : null;
 }
 
 function getNextStartTime() {
@@ -787,7 +822,7 @@ function recalculateTimes() {
 
   scheduleItems.forEach(item => {
     item.startTime = currentTime;
-    currentTime = addSecondsToTime(currentTime, item.duration);
+    currentTime = addSecondsToTime(currentTime, item.duration || 0);
   });
 }
 
@@ -796,7 +831,6 @@ function removeScheduleItem(id) {
   recalculateTimes();
   updateScheduleUI();
   updateFooter();
-  showToast('Program dihapus', 'info');
 }
 
 function moveScheduleItem(fromIndex, toIndex) {
@@ -814,7 +848,7 @@ function updateScheduleUI() {
   const addLiveBtn = document.getElementById('btn-add-live');
 
   clearBtn.disabled = scheduleItems.length === 0;
-  saveBtn.disabled = scheduleItems.length === 0;
+  saveBtn.disabled = scheduleItems.length === 0 || scheduleItems.some(item => !Number.isSafeInteger(item.duration) || item.duration <= 0);
   addBreakBtn.disabled = scheduleItems.length === 0;
   addLiveBtn.disabled = scheduleItems.length === 0;
   updateScheduleSummary();
@@ -869,7 +903,13 @@ function updateScheduleUI() {
           ${typeBadges[item.type] || ''}
         </div>
       </td>
-      <td class="col-duration">${formatDuration(item.duration)}</td>
+      <td class="col-duration">
+        <input class="duration-input${item.durationError ? ' duration-invalid' : ''}" type="text"
+          inputmode="numeric" aria-label="Durasi ${escapeHtml(item.name)} dalam HH:MM:SS"
+          placeholder="${item.durationLoading ? 'Memuat…' : 'HH:MM:SS'}" value="${item.duration ? formatDuration(item.duration) : ''}"
+          ${item.durationLoading ? 'disabled' : ''}
+          data-item-id="${item.id}" title="Format HH:MM:SS">
+      </td>
       <td class="col-type">${getTypeLabel(item.type)}</td>
       <td class="col-actions">
         <button class="btn-icon delete" aria-label="Hapus program" title="Hapus" onclick="removeScheduleItem(${item.id})">
@@ -877,6 +917,17 @@ function updateScheduleUI() {
         </button>
       </td>
     `;
+    tr.querySelector('.duration-input').addEventListener('change', (event) => {
+      const parsedDuration = parseDurationInput(event.currentTarget.value);
+      const targetItem = scheduleItems.find(entry => entry.id === item.id);
+      if (!targetItem) return;
+      targetItem.duration = parsedDuration;
+      targetItem.durationError = parsedDuration === null;
+      recalculateTimes();
+      updateScheduleUI();
+      updateFooter();
+      if (parsedDuration === null) setCreateMessage('Durasi harus berupa HH:MM:SS dan lebih dari 00:00:00.', 'error');
+    });
     tbody.appendChild(tr);
   });
 }
@@ -1018,16 +1069,20 @@ scheduleWrapper.addEventListener('drop', (e) => {
 // Save Modal
 function openSaveModal() {
   if (scheduleItems.length === 0) return;
+  if (scheduleItems.some(item => !Number.isSafeInteger(item.duration) || item.duration <= 0)) {
+    setCreateMessage('Isi durasi valid untuk semua program sebelum menyimpan.', 'error');
+    return;
+  }
 
   const modal = document.getElementById('save-modal');
   const nameInput = document.getElementById('playlist-name');
-  const descInput = document.getElementById('playlist-description');
 
   // Default name: today's date
   const dateInput = document.getElementById('schedule-date');
   const defaultName = dateInput.value || new Date().toISOString().split('T')[0];
   nameInput.value = defaultName;
-  descInput.value = '';
+  setCreateMessage('');
+  setSaveMessage('');
 
   updateSavePreview();
   modal.classList.add('open');
@@ -1044,27 +1099,30 @@ function updateSavePreview() {
   const preview = document.getElementById('preview-path');
   const name = nameInput.value.trim();
   if (name) {
-    preview.textContent = `/playlists/${name}.playlist`;
+    preview.textContent = `playlists/${name}.playlist`;
   } else {
-    preview.textContent = `/playlists/[nama].playlist`;
+    preview.textContent = 'playlists/[nama].playlist';
   }
+  if (document.getElementById('save-message').textContent) setSaveMessage('');
 }
 
 async function savePlaylist() {
+  if (scheduleItems.some(item => !Number.isSafeInteger(item.duration) || item.duration <= 0)) {
+    setSaveMessage('Isi durasi valid untuk semua program sebelum menyimpan.', 'error');
+    return;
+  }
   const nameInput = document.getElementById('playlist-name');
-  const descInput = document.getElementById('playlist-description');
   const name = nameInput.value.trim();
-  const description = descInput.value.trim();
 
   if (!name) {
-    showToast('Nama playlist wajib diisi', 'error');
+    setSaveMessage('Nama playlist wajib diisi.', 'error');
     nameInput.focus();
     return;
   }
 
   // Validasi
   if (!/^\d{4}-\d{2}-\d{2}$/.test(name)) {
-    showToast('Format nama harus yyyy-mm-dd', 'error');
+    setSaveMessage('Format nama harus yyyy-mm-dd.', 'error');
     nameInput.focus();
     return;
   }
@@ -1076,7 +1134,6 @@ async function savePlaylist() {
   try {
     const playlistData = {
       name: name,
-      description: description,
       items: scheduleItems.map(item => ({
         path: item.path,
         name: item.name,
@@ -1093,58 +1150,38 @@ async function savePlaylist() {
 
     if (res.error) throw new Error(res.error);
 
-    showToast(`Playlist "${name}" berhasil disimpan`, 'success');
     closeSaveModal();
+    setCreateMessage(`Playlist “${name}” berhasil disimpan.`, 'success');
 
     setTimeout(() => {
       window.location.href = '/';
-    }, 1500);
+    }, 2500);
   } catch (error) {
-    showToast('Gagal menyimpan: ' + error.message, 'error');
+    setSaveMessage('Gagal menyimpan: ' + error.message, 'error');
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<img src="/static/assets/save.svg" alt="" class="icon"><span>Simpan Playlist</span>';
   }
 }
 
-// Notifikasi
-function showToast(message, type = 'info') {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
+function setCreateMessage(message, type = "info") {
+  const notice = document.getElementById("create-notice");
+  if (!notice) return;
+  notice.textContent = message;
+  notice.className = `inline-message ${type}`;
+  notice.hidden = !message;
+}
 
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-
-  const icons = {
-    success: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>',
-    error: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>',
-    warning: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
-    info: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>'
-  };
-
-  toast.innerHTML = `
-    ${icons[type] || icons.info}
-    <span class="toast-message">${escapeHtml(message)}</span>
-    <button class="toast-close" aria-label="Tutup">&times;</button>
-  `;
-
-  toast.querySelector('.toast-close').addEventListener('click', () => {
-    toast.remove();
-  });
-
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    if (toast.parentNode) {
-      toast.style.animation = 'toastIn 0.3s ease-out reverse';
-      setTimeout(() => toast.remove(), 300);
-    }
-  }, 4000);
+function setSaveMessage(message, type = "info") {
+  const notice = document.getElementById("save-message");
+  if (!notice) return;
+  notice.textContent = message;
+  notice.className = `inline-message ${type}`;
+  notice.hidden = !message;
 }
 
 window.removeScheduleItem = removeScheduleItem;
 window.addVideoToSchedule = addVideoToSchedule;
-window.showToast = showToast;
 window.formatDuration = formatDuration;
 window.escapeHtml = escapeHtml;
 window.initCreatePage = initCreatePage;

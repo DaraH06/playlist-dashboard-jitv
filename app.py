@@ -1,5 +1,7 @@
 import os
 import re
+import math
+import subprocess
 from dotenv import load_dotenv
 load_dotenv()
 import json
@@ -154,6 +156,38 @@ def api_browse():
     })
 
 
+@app.route("/api/video-duration", methods=["POST"])
+@login_required
+def api_video_duration():
+    """Read one selected video's duration without probing the whole library."""
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request tidak valid"}), 400
+    rel_path = data.get("path", "")
+    if not isinstance(rel_path, str) or not rel_path.lower().endswith(ALLOWED_EXT):
+        return jsonify({"error": "Format video tidak didukung"}), 400
+    try:
+        full_path = safe_path(rel_path)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Path video tidak valid"}), 400
+    if not os.path.isfile(full_path):
+        return jsonify({"error": "File video tidak ditemukan"}), 404
+
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", full_path],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        duration = float(result.stdout.strip())
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("Durasi tidak valid")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return jsonify({"error": "Durasi video tidak dapat dibaca"}), 422
+
+    return jsonify({"duration": int(round(duration))})
+
+
 @app.route("/api/import-playlist", methods=["POST"])
 @login_required
 def api_import_playlist():
@@ -280,10 +314,15 @@ def api_create_named_playlist():
     precision_entries = []
     for item in items:
         entry_type = item.get('type', 'video')
+        duration = item.get('duration')
+        if entry_type in ('video', 'break', 'live') and (
+            isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0
+        ):
+            return jsonify({"error": "Semua program harus memiliki durasi positif dalam detik"}), 400
         if entry_type == 'video':
             precision_entries.append({
                 'start': time_to_seconds(item.get('start_time', '00:00:00')),
-                'duration': item.get('duration', 0),
+                'duration': duration,
                 'label': item.get('name', ''),
                 'path': item.get('path', ''),
                 'type': 'video'
@@ -291,14 +330,14 @@ def api_create_named_playlist():
         elif entry_type == 'break':
             precision_entries.append({
                 'start': time_to_seconds(item.get('start_time', '00:00:00')),
-                'duration': item.get('duration', 0),
+                'duration': duration,
                 'label': 'Istirahat',
                 'type': 'break'
             })
         elif entry_type == 'live':
             precision_entries.append({
                 'start': time_to_seconds(item.get('start_time', '00:00:00')),
-                'duration': item.get('duration', 0),
+                'duration': duration,
                 'label': item.get('name', 'Live CCTV'),
                 'type': 'live'
             })
