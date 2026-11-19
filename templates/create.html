@@ -45,10 +45,19 @@
           <span id="total-duration" class="total-duration">Total Siaran: 00:00:00</span>
         </div>
         <div class="schedule-start-time">
-          <label for="start-time-input" class="visually-hidden">Jam Mulai</label>
           <div class="input-with-label">
             <span class="start-time-label">Jam Mulai:</span>
-            <input type="time" id="start-time-input" value="08:00:00" step="1" aria-label="Jam mulai siaran">
+            <div class="start-time-fields" role="group" aria-label="Jam mulai siaran">
+              <label class="visually-hidden" for="start-hour">Jam (00–23)</label>
+              <input type="number" id="start-hour" min="0" max="23" value="08" inputmode="numeric" aria-label="Jam, format 24 jam">
+              <span aria-hidden="true">:</span>
+              <label class="visually-hidden" for="start-minute">Menit (00–59)</label>
+              <input type="number" id="start-minute" min="0" max="59" value="00" inputmode="numeric" aria-label="Menit">
+              <span aria-hidden="true">:</span>
+              <label class="visually-hidden" for="start-second">Detik (00–59)</label>
+              <input type="number" id="start-second" min="0" max="59" value="00" inputmode="numeric" aria-label="Detik">
+            </div>
+            <input type="hidden" id="start-time-input" value="08:00:00">
           </div>
         </div>
         <span class="schedule-hint start-time-hint">Kosongkan untuk default</span>

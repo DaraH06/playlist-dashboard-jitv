@@ -10,7 +10,13 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  return res.json();
+  const text = await res.text();
+  if (!res.ok) {
+    let errMsg = text;
+    try { errMsg = JSON.parse(text).error || text; } catch {}
+    throw new Error(errMsg);
+  }
+  return text ? JSON.parse(text) : {};
 }
 
 function displayName(relPath) {
@@ -694,11 +700,32 @@ function setupEventListeners() {
     }
   });
 
-  // Start time
-  document.getElementById('start-time-input').addEventListener('change', () => {
-    recalculateTimes();
-    updateScheduleUI();
+  // Start time (24-hour fields)
+  const startHour = document.getElementById('start-hour');
+  const startMinute = document.getElementById('start-minute');
+  const startSecond = document.getElementById('start-second');
+  const hiddenStart = document.getElementById('start-time-input');
+  function buildStartTime() {
+    const clamp = (field, max) => {
+      const value = Number.parseInt(field.value, 10);
+      return Number.isFinite(value) ? Math.max(0, Math.min(max, value)) : 0;
+    };
+    const h = clamp(startHour, 23);
+    const m = clamp(startMinute, 59);
+    const s = clamp(startSecond, 59);
+    startHour.value = String(h);
+    startMinute.value = String(m);
+    startSecond.value = String(s);
+    hiddenStart.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  [startHour, startMinute, startSecond].forEach(el => {
+    el.addEventListener('input', () => {
+      buildStartTime();
+      recalculateTimes();
+      updateScheduleUI();
+    });
   });
+  buildStartTime();
 
   // Date input
   document.getElementById('schedule-date').addEventListener('change', () => {
@@ -1040,31 +1067,33 @@ function handleDragEnd(e) {
   }
 }
 
-// Drop zone
+// Drop zone (create page only)
 const scheduleWrapper = document.getElementById('schedule-table-wrapper');
-scheduleWrapper.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-  scheduleWrapper.classList.add('drag-over');
-});
+if (scheduleWrapper) {
+  scheduleWrapper.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    scheduleWrapper.classList.add('drag-over');
+  });
 
-scheduleWrapper.addEventListener('dragleave', (e) => {
-  if (!scheduleWrapper.contains(e.relatedTarget)) {
-    scheduleWrapper.classList.remove('drag-over');
-  }
-});
-
-scheduleWrapper.addEventListener('drop', (e) => {
-  e.preventDefault();
-  scheduleWrapper.classList.remove('drag-over');
-
-  try {
-    const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-    if (data && data.path) {
-      addVideoToSchedule(data);
+  scheduleWrapper.addEventListener('dragleave', (e) => {
+    if (!scheduleWrapper.contains(e.relatedTarget)) {
+      scheduleWrapper.classList.remove('drag-over');
     }
-  } catch (err) { }
-});
+  });
+
+  scheduleWrapper.addEventListener('drop', (e) => {
+    e.preventDefault();
+    scheduleWrapper.classList.remove('drag-over');
+
+    try {
+      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+      if (data && data.path) {
+        addVideoToSchedule(data);
+      }
+    } catch (err) { }
+  });
+}
 
 // Save Modal
 function openSaveModal() {
@@ -1143,19 +1172,14 @@ async function savePlaylist() {
       }))
     };
 
-    const res = await api('/api/named-playlists', {
+    const res = await api('/api/create-playlist', {
       method: 'POST',
       body: JSON.stringify(playlistData)
     });
 
     if (res.error) throw new Error(res.error);
 
-    closeSaveModal();
-    setCreateMessage(`Playlist “${name}” berhasil disimpan.`, 'success');
-
-    setTimeout(() => {
-      window.location.href = '/';
-    }, 2500);
+    window.location.href = '/';
   } catch (error) {
     setSaveMessage('Gagal menyimpan: ' + error.message, 'error');
   } finally {

@@ -11,7 +11,7 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from mpv_controller import make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
-from precision_scheduler import PrecisionScheduler, parse_playlist_text
+from precision_scheduler import PrecisionScheduler, parse_playlist_text, CCTV_LIVE
 
 app = Flask(__name__)
 
@@ -530,6 +530,96 @@ def api_precision_playlist_detail(date_name):
 @login_required
 def create_playlist():
     return render_template("create.html")
+
+
+@app.route("/api/create-playlist", methods=["POST"])
+@login_required
+def api_save_created_playlist():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Format permintaan tidak valid"}), 400
+    name = data.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    items = data.get("items")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", name):
+        return jsonify({"error": "Format nama harus yyyy-mm-dd"}), 400
+    try:
+        from datetime import date
+        date.fromisoformat(name)
+    except ValueError:
+        return jsonify({"error": "Tanggal playlist tidak valid"}), 400
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "Playlist tidak boleh kosong"}), 400
+
+    from generate_playlist import seconds_to_timecode
+    rows = []
+    precision_entries = []
+    for item in items:
+        if not isinstance(item, dict):
+            return jsonify({"error": "Format item playlist tidak valid"}), 400
+        kind = item.get("type", "video")
+        duration = item.get("duration")
+        start = item.get("start_time")
+        if kind not in ("video", "live", "break"):
+            return jsonify({"error": "Tipe item playlist tidak valid"}), 400
+        if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
+            return jsonify({"error": "Semua program harus memiliki durasi positif dalam detik"}), 400
+        try:
+            if not isinstance(start, str) or not re.fullmatch(r"\d{2,}:\d{2}:\d{2}", start):
+                raise ValueError
+            hours, minutes, seconds = (int(part) for part in start.split(":"))
+            if minutes > 59 or seconds > 59:
+                raise ValueError
+            start_seconds = hours * 3600 + minutes * 60 + seconds
+            if start_seconds >= 172800:
+                return jsonify({"error": "Jam mulai melebihi batas 48 jam"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "Jam mulai tidak valid"}), 400
+
+        if kind == "video":
+            rel_path = item.get("path")
+            try:
+                full_path = safe_path(rel_path)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Path video tidak valid"}), 400
+            if not os.path.isfile(full_path):
+                return jsonify({"error": f"Video tidak ditemukan: {item.get('name', '')}"}), 400
+            normalized_path = os.path.relpath(full_path, VIDEO_ROOT).replace(os.sep, "/")
+            content = f"UTF8{normalized_path}"
+            precision_entries.append({
+                "start": start_seconds, "duration": duration, "end": start_seconds + duration,
+                "label": os.path.basename(normalized_path), "path": normalized_path, "type": "video",
+            })
+        elif kind == "live":
+            content = "srt://live"
+            precision_entries.append({
+                "start": start_seconds, "duration": duration, "end": start_seconds + duration,
+                "label": CCTV_LIVE, "type": "live",
+            })
+        else:
+            return jsonify({"error": "Tipe item 'break' tidak didukung dalam playlist presisi"}), 400
+
+        rows.append((seconds_to_timecode(start_seconds), seconds_to_timecode(duration), content))
+
+    if not rows:
+        return jsonify({"error": "Playlist harus memiliki video atau segmen live"}), 400
+
+    output_dir = os.path.join(os.path.dirname(__file__), "playlist")
+    output_path = os.path.join(output_dir, f"{name}.playlist")
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8", newline="\n") as playlist_file:
+            for row in rows:
+                playlist_file.write("\t".join(row) + "\n")
+    except OSError as exc:
+        return jsonify({"error": f"Gagal menyimpan file playlist: {exc}"}), 500
+
+    try:
+        precision.save_playlist(name, precision_entries)
+    except (ValueError, OSError, TypeError) as exc:
+        app.logger.exception("Gagal mendaftarkan jadwal playlist %s", name)
+        return jsonify({"error": "Gagal mendaftarkan jadwal playlist"}), 500
+    return jsonify({"status": "ok", "name": name, "path": f"playlist/{name}.playlist"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, threaded=True)

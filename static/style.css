@@ -2209,24 +2209,38 @@ button.btn-danger:hover {
   font-size: 14px;
 }
 
-.input-with-label input {
-  position: static;
-  width: 92px;
+.start-time-fields {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: #96999f;
+  font-variant-numeric: tabular-nums;
+}
+
+.start-time-fields input {
+  width: 30px;
   height: 30px;
   padding: 0;
   border: 0;
+  outline: 0;
   background: transparent;
-  color: #96999f;
-  color-scheme: dark;
+  color: #f0f0f1;
+  font: inherit;
   font-size: 14px;
-  opacity: 1;
-  pointer-events: auto;
-  cursor: pointer;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
 }
 
-.input-with-label input::-webkit-calendar-picker-indicator {
-  filter: invert(1);
-  opacity: .8;
+.start-time-fields input::-webkit-inner-spin-button,
+.start-time-fields input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.start-time-fields input:focus {
+  border-radius: 4px;
+  background: #24262b;
 }
 
 .input-with-label:focus-within {
