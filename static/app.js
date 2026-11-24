@@ -2,6 +2,7 @@ let currentBrowsePath = "";
 const browseCache = new Map();
 const browseErrors = new Map();
 const expandedFolders = new Set();
+let fallbackVideos = [];
 
 let timerBaseline = { elapsedSec: null, durationSec: null, atMs: null, paused: true };
 
@@ -23,6 +24,64 @@ function displayName(relPath) {
   return relPath.split("/").pop();
 }
 
+async function loadCreateFallbackVideos() {
+  try {
+    fallbackVideos = await api('/api/fallback-videos');
+    renderFallbackVideos();
+  } catch (error) {
+    const notice = document.getElementById('create-notice');
+    if (notice) setCreateMessage(`Gagal memuat video pengganti: ${error.message}`, 'error');
+    else console.error('Gagal memuat video pengganti:', error);
+  }
+}
+
+function renderFallbackVideos() {
+  const list = document.getElementById('fallback-list');
+  if (!list) return;
+  list.replaceChildren();
+  if (!fallbackVideos.length) {
+    const empty = document.createElement('li');
+    empty.className = 'queue-empty';
+    empty.textContent = 'Belum ada video pengganti.';
+    list.appendChild(empty);
+    return;
+  }
+  fallbackVideos.forEach((path, index) => {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = displayName(path);
+    name.title = path;
+    const remove = document.createElement('button');
+    remove.className = 'btn-danger';
+    remove.type = 'button';
+    remove.textContent = 'Hapus';
+    remove.addEventListener('click', async () => {
+      const updated = fallbackVideos.filter((_, itemIndex) => itemIndex !== index);
+      remove.disabled = true;
+      try {
+        const saved = await api('/api/fallback-videos', {
+          method: 'POST',
+          body: JSON.stringify({ items: updated })
+        });
+        fallbackVideos = saved.items;
+        renderFallbackVideos();
+      } catch (error) {
+        remove.disabled = false;
+        setCreateMessage(`Gagal menghapus video pengganti: ${error.message}`, 'error');
+      }
+    });
+    item.draggable = true;
+    item.dataset.videoPath = path;
+    item.dataset.videoName = displayName(path);
+    item.addEventListener('dragstart', handleFallbackDragStart);
+    item.addEventListener('dragend', handleFallbackDragEnd);
+    item.addEventListener('dblclick', () => addVideoToSchedule({ path, name: displayName(path) }));
+    item.append(name, remove);
+    list.appendChild(item);
+  });
+}
+
 // ---------- Pustaka Video Utama (Folder Tree Figma-style) ----------
 
 async function loadBrowseFolder(path) {
@@ -33,10 +92,24 @@ async function loadBrowseFolder(path) {
   return data;
 }
 
-function renderLibraryTree() {
+function renderLibraryTree(searchResults = null) {
   const tree = document.getElementById("browse-list");
   tree.innerHTML = "";
   const rootData = browseCache.get("");
+  const searchInput = document.getElementById("library-search-input");
+  const searchQuery = searchInput ? searchInput.value.trim() : "";
+  if (searchQuery) {
+    if (searchResults === null) {
+      tree.appendChild(makeTreeMessage("Mencari video…"));
+      return;
+    }
+    if (!searchResults.length) {
+      tree.appendChild(makeTreeMessage("Tidak ada video yang cocok"));
+      return;
+    }
+    appendFolderContents(tree, { folders: [], files: searchResults });
+    return;
+  }
   if (browseErrors.has("")) {
     tree.appendChild(makeTreeMessage(`Tidak dapat membaca pustaka: ${browseErrors.get("")}`));
   } else if (!rootData) {
@@ -108,6 +181,7 @@ function appendFolderContents(list, data) {
     if (document.body.classList.contains("create-body")) {
       row.setAttribute("role", "button");
       row.tabIndex = 0;
+      row.onclick = null;
       row.ondblclick = () => addVideoToSchedule(entry);
       row.onkeydown = (event) => {
         if (event.key === "Enter" || event.key === " ") {
@@ -550,6 +624,7 @@ if (!document.body.classList.contains("create-body")) {
 
   function renderFallbackList() {
     const ul = document.getElementById("fallback-list");
+    if (!ul) return;
     ul.innerHTML = "";
     if (_fallbackList.length === 0) {
       ul.innerHTML = "<li class=\"queue-empty\">Belum ada video pengganti. Klik \"+ Tambah\" untuk memilih dari pustaka.</li>";
@@ -655,16 +730,19 @@ if (!document.body.classList.contains("create-body")) {
     });
   }
 
-  document.getElementById("btn-add-fallback").onclick = openFallbackPicker;
-  document.getElementById("btn-close-fallback-picker").onclick = closeFallbackPicker;
-  document.getElementById("fallback-picker-modal").addEventListener("click", (e) => {
-    if (e.target === document.getElementById("fallback-picker-modal")) closeFallbackPicker();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      closeFallbackPicker();
-    }
-  });
+  const addFallbackButton = document.getElementById("btn-add-fallback");
+  if (addFallbackButton) addFallbackButton.onclick = openFallbackPicker;
+  const closeFallbackButton = document.getElementById("btn-close-fallback-picker");
+  const fallbackPickerModal = document.getElementById("fallback-picker-modal");
+  if (closeFallbackButton && fallbackPickerModal) {
+    closeFallbackButton.onclick = closeFallbackPicker;
+    fallbackPickerModal.addEventListener("click", (e) => {
+      if (e.target === fallbackPickerModal) closeFallbackPicker();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeFallbackPicker();
+    });
+  }
 }
 
 // ============================================================
@@ -686,6 +764,7 @@ function initCreatePage() {
   preserveScheduleTimes = false;
   previousEditStartTime = null;
   browseTo("");
+  loadCreateFallbackVideos();
   setupEventListeners();
   updateScheduleUI();
   updateFooter();
@@ -756,6 +835,28 @@ async function loadPlaylistForEdit(dateName) {
 
 function setupEventListeners() {
   // Back button
+  let librarySearchTimer;
+  document.getElementById('library-search-input').addEventListener('input', (event) => {
+    const query = event.currentTarget.value.trim();
+    clearTimeout(librarySearchTimer);
+    if (!query) {
+      renderLibraryTree();
+      return;
+    }
+    renderLibraryTree(null);
+    librarySearchTimer = setTimeout(async () => {
+      try {
+        const data = await api(`/api/browse?q=${encodeURIComponent(query)}`);
+        if (document.getElementById('library-search-input').value.trim() === query) {
+          renderLibraryTree(data.files || []);
+        }
+      } catch (error) {
+        setCreateMessage(`Pencarian video gagal: ${error.message}`, 'error');
+        renderLibraryTree([]);
+      }
+    }, 250);
+  });
+
   document.getElementById('btn-back').addEventListener('click', () => {
     if (scheduleItems.length > 0) {
       if (confirm('Perubahan tidak tersimpan. Yakin ingin keluar?')) {
@@ -974,7 +1075,7 @@ function recalculateTimes() {
 }
 
 function removeScheduleItem(id) {
-  scheduleItems = scheduleItems.filter(item => item.id !== id);
+  scheduleItems = scheduleItems.filter(item => String(item.id) !== String(id));
   if (preserveScheduleTimes) {
     let currentTime = scheduleItems[0]?.startTime || document.getElementById('start-time-input').value;
     scheduleItems.forEach(item => {
@@ -991,7 +1092,7 @@ function moveScheduleItem(fromIndex, toIndex) {
   const [moved] = scheduleItems.splice(fromIndex, 1);
   scheduleItems.splice(toIndex, 0, moved);
   if (preserveScheduleTimes) {
-    let currentTime = scheduleItems[0]?.startTime || document.getElementById('start-time-input').value;
+    let currentTime = document.getElementById('start-time-input').value || '08:00:00';
     scheduleItems.forEach(item => {
       item.startTime = currentTime;
       currentTime = addSecondsToTime(currentTime, item.duration || 0);
@@ -1074,7 +1175,7 @@ function updateScheduleUI() {
       </td>
       <td class="col-type">${item.missing ? 'File hilang' : getTypeLabel(item.type)}</td>
       <td class="col-actions">
-        <button class="btn-icon delete" aria-label="Hapus program" title="Hapus" onclick="removeScheduleItem(${item.id})">
+        <button class="btn-icon delete" aria-label="Hapus program" title="Hapus" onclick="removeScheduleItem('${item.id}')">
           <img src="/static/assets/delete.svg" alt="">
         </button>
       </td>
@@ -1206,6 +1307,20 @@ function handleDragEnd(e) {
     draggedLibraryItem.style.opacity = '';
     draggedLibraryItem = null;
   }
+}
+
+function handleFallbackDragStart(e) {
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', JSON.stringify({
+    path: e.currentTarget.dataset.videoPath,
+    name: e.currentTarget.dataset.videoName,
+    duration: 0
+  }));
+  e.currentTarget.style.opacity = '0.5';
+}
+
+function handleFallbackDragEnd(e) {
+  e.currentTarget.style.opacity = '';
 }
 
 // Drop zone (create page only)

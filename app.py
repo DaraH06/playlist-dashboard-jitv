@@ -117,6 +117,7 @@ def api_browse():
     """List folders and video files under VIDEO_ROOT/<path>.
     Sandboxed so a crafted path can't escape VIDEO_ROOT."""
     rel_path = request.args.get("path", "")
+    query = request.args.get("q", "").strip().lower()
     try:
         full_dir = safe_path(rel_path)
     except ValueError:
@@ -127,18 +128,26 @@ def api_browse():
 
     folders = []
     files = []
-    try:
-        entries = sorted(os.listdir(full_dir), key=str.lower)
-    except OSError as e:
-        return jsonify({"error": str(e)}), 500
+    if query:
+        # Recursive search across the video library
+        for dirpath, _dirnames, filenames in os.walk(full_dir):
+            for name in filenames:
+                if name.lower().endswith(ALLOWED_EXT) and query in name.lower():
+                    rel = os.path.relpath(os.path.join(dirpath, name), VIDEO_ROOT)
+                    files.append({"name": name, "path": rel.replace("\\", "/")})
+    else:
+        try:
+            entries = sorted(os.listdir(full_dir), key=str.lower)
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
 
-    for name in entries:
-        full = os.path.join(full_dir, name)
-        entry_rel = os.path.join(rel_path, name).replace("\\", "/").lstrip("/")
-        if os.path.isdir(full):
-            folders.append({"name": name, "path": entry_rel})
-        elif os.path.isfile(full) and name.lower().endswith(ALLOWED_EXT):
-            files.append({"name": name, "path": entry_rel})
+        for name in entries:
+            full = os.path.join(full_dir, name)
+            entry_rel = os.path.join(rel_path, name).replace("\\", "/").lstrip("/")
+            if os.path.isdir(full):
+                folders.append({"name": name, "path": entry_rel})
+            elif os.path.isfile(full) and name.lower().endswith(ALLOWED_EXT):
+                files.append({"name": name, "path": entry_rel})
 
     # breadcrumb segments for the current path
     parts = [p for p in rel_path.split("/") if p]

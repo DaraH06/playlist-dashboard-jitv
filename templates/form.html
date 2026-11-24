@@ -49,7 +49,8 @@
             <span class="start-time-label">Jam Mulai:</span>
             <div class="start-time-fields" role="group" aria-label="Jam mulai siaran">
               <label class="visually-hidden" for="start-hour">Jam (00–47)</label>
-              <input type="number" id="start-hour" min="0" max="47" value="08" inputmode="numeric" aria-label="Jam siaran (maksimum 47 untuk batas jadwal 48 jam)">
+              <input type="number" id="start-hour" min="0" max="47" value="08" inputmode="numeric"
+                aria-label="Jam siaran (maksimum 47 untuk batas jadwal 48 jam)">
               <span aria-hidden="true">:</span>
               <label class="visually-hidden" for="start-minute">Menit (00–59)</label>
               <input type="number" id="start-minute" min="0" max="59" value="00" inputmode="numeric" aria-label="Menit">
@@ -109,6 +110,14 @@
     <section class="panel library-panel" aria-label="Pustaka Video">
       <div class="library-header">
         <h2>Pustaka Video</h2>
+        <div class="library-search">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="search" id="library-search-input" placeholder="Cari video…" aria-label="Cari video">
+        </div>
         <div id="library-path" class="library-path">
           <span class="path-segment" data-path="">Semua Video</span>
         </div>
@@ -116,6 +125,19 @@
       <ul id="browse-list" class="library-tree" aria-label="Pustaka Video" role="tree">
         <li class="tree-message">Memuat pustaka…</li>
       </ul>
+
+      <!-- Fallback Video List (Video Pengganti) -->
+      <section class="fallback-panel" aria-label="Video Pengganti">
+        <h2>Video Pengganti</h2>
+        <p class="schedule-hint"><strong>Cara kerja:</strong> Saat aktif dan ada slot <strong>Live CCTV</strong> atau
+          <strong>video tidak ditemukan</strong> di jadwal, sistem akan otomatis memutar video dari daftar ini
+          (bergantian) alih-alih menampilkan layar hitam. Video akan di-<em>loop</em> selama durasi slot tersebut
+          berlangsung.</p>
+        <div class="fallback-actions">
+          <span class="fallback-hint">Klik 2× atau tarik video pengganti ini ke jadwal untuk menambahkannya</span>
+        </div>
+        <ul id="fallback-list" class="file-list fallback-list"></ul>
+      </section>
     </section>
   </main>
 
