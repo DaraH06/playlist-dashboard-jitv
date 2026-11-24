@@ -328,12 +328,7 @@ def api_create_named_playlist():
                 'type': 'video'
             })
         elif entry_type == 'break':
-            precision_entries.append({
-                'start': time_to_seconds(item.get('start_time', '00:00:00')),
-                'duration': duration,
-                'label': 'Istirahat',
-                'type': 'break'
-            })
+            return jsonify({'error': "Tipe item 'break' tidak didukung dalam playlist presisi"}), 400
         elif entry_type == 'live':
             precision_entries.append({
                 'start': time_to_seconds(item.get('start_time', '00:00:00')),
@@ -529,7 +524,7 @@ def api_precision_playlist_detail(date_name):
 @app.route("/create-playlist")
 @login_required
 def create_playlist():
-    return render_template("create.html")
+    return render_template("form.html")
 
 
 @app.route("/api/create-playlist", methods=["POST"])

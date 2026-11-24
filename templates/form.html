@@ -48,8 +48,8 @@
           <div class="input-with-label">
             <span class="start-time-label">Jam Mulai:</span>
             <div class="start-time-fields" role="group" aria-label="Jam mulai siaran">
-              <label class="visually-hidden" for="start-hour">Jam (00–23)</label>
-              <input type="number" id="start-hour" min="0" max="23" value="08" inputmode="numeric" aria-label="Jam, format 24 jam">
+              <label class="visually-hidden" for="start-hour">Jam (00–47)</label>
+              <input type="number" id="start-hour" min="0" max="47" value="08" inputmode="numeric" aria-label="Jam siaran (maksimum 47 untuk batas jadwal 48 jam)">
               <span aria-hidden="true">:</span>
               <label class="visually-hidden" for="start-minute">Menit (00–59)</label>
               <input type="number" id="start-minute" min="0" max="59" value="00" inputmode="numeric" aria-label="Menit">
@@ -67,7 +67,7 @@
         <p class="library-instruction">Tarik video dari pustaka (kanan) atau klik 2x untuk menambahkan ke jadwal</p>
         <div class="toolbar-actions">
           <button id="btn-add-break" class="btn btn-ghost btn-sm" type="button" disabled>
-            <span>+ Istirahat</span>
+            <span>+ Istirahat (belum didukung)</span>
           </button>
           <button id="btn-add-live" class="btn btn-ghost btn-sm" type="button" disabled>
             <span>+ Live CCTV</span>

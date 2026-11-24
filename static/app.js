@@ -337,6 +337,11 @@ async function loadNamedPlaylists() {
       const btnGroup = document.createElement("div");
       btnGroup.className = "btn-group";
 
+      const btnEdit = document.createElement("button");
+      btnEdit.textContent = "Edit";
+      btnEdit.title = "Edit playlist ini";
+      btnEdit.onclick = () => { window.location.href = `/create-playlist?edit=${encodeURIComponent(name)}`; };
+
       const btnRundown = document.createElement("button");
       btnRundown.textContent = "👁 Rundown";
       btnRundown.title = "Lihat rundown siaran tanggal ini";
@@ -349,7 +354,7 @@ async function loadNamedPlaylists() {
         loadNamedPlaylists();
       };
 
-      btnGroup.append(btnRundown, btnHapus);
+      btnGroup.append(btnEdit, btnRundown, btnHapus);
       li.append(span, btnGroup);
       ul.appendChild(li);
     });
@@ -667,15 +672,86 @@ if (!document.body.classList.contains("create-body")) {
 // ============================================================
 
 let scheduleItems = [];
+let editingPlaylistName = null;
+let preserveScheduleTimes = false;
+let previousEditStartTime = null;
 let draggedItem = null;
 const addingVideoPaths = new Set();
+let scheduleIdCounter = 0;
+function generateScheduleId() { return `${Date.now()}-${++scheduleIdCounter}`; }
 
 function initCreatePage() {
   if (!document.body.classList.contains('create-body')) return;
+  editingPlaylistName = null;
+  preserveScheduleTimes = false;
+  previousEditStartTime = null;
   browseTo("");
   setupEventListeners();
   updateScheduleUI();
   updateFooter();
+  const editName = new URLSearchParams(window.location.search).get('edit');
+  if (editName) loadPlaylistForEdit(editName);
+}
+
+async function loadPlaylistForEdit(dateName) {
+  setCreateMessage('Memuat playlist...', 'info');
+  try {
+    const entries = await api(`/api/precision/playlists/${encodeURIComponent(dateName)}`);
+    if (!Array.isArray(entries)) throw new Error('Format playlist tidak valid');
+    if (entries.length === 0) throw new Error('Playlist kosong, tidak bisa diedit');
+
+    const firstStart = entries[0].start;
+    if (!Number.isFinite(firstStart) || firstStart < 0 || firstStart >= 172800) {
+      throw new Error('Jam mulai playlist melebihi batas 48 jam');
+    }
+    editingPlaylistName = dateName;
+    document.querySelector('.page-title h1').textContent = `Edit Playlist: ${dateName}`;
+    document.getElementById('schedule-date').value = dateName;
+    document.getElementById('schedule-date').disabled = true;
+    document.getElementById('start-hour').value = String(Math.floor(firstStart / 3600));
+    document.getElementById('start-minute').value = String(Math.floor((firstStart % 3600) / 60));
+    document.getElementById('start-second').value = String(Math.floor(firstStart % 60));
+    document.getElementById('start-hour').dispatchEvent(new Event('input'));
+
+    const missingCount = entries.filter(entry => entry.type === 'missing').length;
+    scheduleItems = entries.map((entry, index) => ({
+      id: generateScheduleId(),
+      path: entry.path || null,
+      name: entry.label || (entry.type === 'live' ? 'Live CCTV' : 'Istirahat'),
+      duration: Math.round(entry.duration),
+      durationError: false,
+      durationLoading: false,
+      type: entry.type,
+      missing: entry.type === 'missing',
+      startTime: _secondsToClockWIB(entry.start || 0)
+    }));
+    document.getElementById('start-time-input').value = _secondsToClockWIB(firstStart);
+    previousEditStartTime = _secondsToClockWIB(firstStart);
+    preserveScheduleTimes = true;
+    recalculateTimes();
+    updateScheduleUI();
+    updateFooter();
+    if (missingCount) {
+      setCreateMessage(`Peringatan: ${missingCount} video tidak ditemukan. Perbaiki atau hapus sebelum menyimpan.`, 'warning');
+    }
+  } catch (error) {
+    editingPlaylistName = null;
+    preserveScheduleTimes = false;
+    previousEditStartTime = null;
+    document.getElementById('schedule-date').disabled = false;
+    document.getElementById('schedule-date').value = '';
+    const url = new URL(window.location.href);
+    url.searchParams.delete('edit');
+    window.history.replaceState({}, '', url);
+    document.querySelector('.page-title h1').textContent = 'Playlist Baru';
+    document.getElementById('start-hour').value = '08';
+    document.getElementById('start-minute').value = '00';
+    document.getElementById('start-second').value = '00';
+    document.getElementById('start-hour').dispatchEvent(new Event('input'));
+    updateScheduleUI();
+    updateFooter();
+    setCreateMessage(`Gagal memuat playlist: ${error.message}`, 'error');
+  }
 }
 
 function setupEventListeners() {
@@ -694,6 +770,18 @@ function setupEventListeners() {
   document.getElementById('btn-clear').addEventListener('click', () => {
     if (scheduleItems.length > 0 && confirm('Hapus semua program dari jadwal?')) {
       scheduleItems = [];
+      editingPlaylistName = null;
+      preserveScheduleTimes = false;
+      previousEditStartTime = null;
+      document.getElementById('schedule-date').disabled = false;
+      const url = new URL(window.location.href);
+      url.searchParams.delete('edit');
+      window.history.replaceState({}, '', url);
+      document.getElementById('start-hour').value = '08';
+      document.getElementById('start-minute').value = '00';
+      document.getElementById('start-second').value = '00';
+      document.getElementById('start-hour').dispatchEvent(new Event('input'));
+      document.querySelector('.page-title h1').textContent = 'Playlist Baru';
       updateScheduleUI();
       updateFooter();
       setCreateMessage('Jadwal dikosongkan.');
@@ -710,7 +798,7 @@ function setupEventListeners() {
       const value = Number.parseInt(field.value, 10);
       return Number.isFinite(value) ? Math.max(0, Math.min(max, value)) : 0;
     };
-    const h = clamp(startHour, 23);
+    const h = clamp(startHour, 47);
     const m = clamp(startMinute, 59);
     const s = clamp(startSecond, 59);
     startHour.value = String(h);
@@ -721,6 +809,14 @@ function setupEventListeners() {
   [startHour, startMinute, startSecond].forEach(el => {
     el.addEventListener('input', () => {
       buildStartTime();
+      if (preserveScheduleTimes && previousEditStartTime !== hiddenStart.value) {
+        let currentTime = hiddenStart.value;
+        scheduleItems.forEach(item => {
+          item.startTime = currentTime;
+          currentTime = addSecondsToTime(currentTime, item.duration || 0);
+        });
+        previousEditStartTime = hiddenStart.value;
+      }
       recalculateTimes();
       updateScheduleUI();
     });
@@ -740,6 +836,8 @@ function setupEventListeners() {
       dateInput.click();
     }
   });
+
+  document.getElementById('btn-add-live').addEventListener('click', addLiveToSchedule);
 
   // Save button
   document.getElementById('btn-save').addEventListener('click', openSaveModal);
@@ -766,6 +864,17 @@ function setupEventListeners() {
   });
 }
 
+function addLiveToSchedule() {
+  const item = {
+    id: generateScheduleId(), path: null, name: 'Live CCTV', duration: 3600,
+    durationError: false, durationLoading: false, type: 'live', startTime: getNextStartTime()
+  };
+  scheduleItems.push(item);
+  recalculateTimes();
+  updateScheduleUI();
+  updateFooter();
+}
+
 async function addVideoToSchedule(video) {
   if (scheduleItems.some(item => item.path === video.path)) {
     setCreateMessage('Video sudah ada di jadwal.', 'warning');
@@ -775,7 +884,7 @@ async function addVideoToSchedule(video) {
 
   addingVideoPaths.add(video.path);
   const item = {
-    id: Date.now() + Math.random(),
+    id: generateScheduleId(),
     path: video.path,
     name: video.name,
     duration: null,
@@ -837,24 +946,42 @@ function getNextStartTime() {
 function addSecondsToTime(timeStr, seconds) {
   const [h, m, s] = timeStr.split(':').map(Number);
   let total = h * 3600 + m * 60 + s + seconds;
-  const nh = Math.floor(total / 3600) % 24;
+  const nh = Math.floor(total / 3600);
   const nm = Math.floor((total % 3600) / 60);
   const ns = total % 60;
   return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}:${String(ns).padStart(2, '0')}`;
+}
+
+function isValidTimeString(timeStr) {
+  const match = /^(\d{2,}):(\d{2}):(\d{2})$/.exec(timeStr || '');
+  if (!match) return false;
+  const [, hours, minutes, seconds] = match;
+  return Number(hours) < 48 && Number(minutes) < 60 && Number(seconds) < 60;
 }
 
 function recalculateTimes() {
   const startInput = document.getElementById('start-time-input');
   let currentTime = startInput.value || '08:00:00';
 
-  scheduleItems.forEach(item => {
-    item.startTime = currentTime;
+  scheduleItems.forEach((item, index) => {
+    if (preserveScheduleTimes && index > 0 && isValidTimeString(item.startTime)) {
+      currentTime = item.startTime;
+    } else {
+      item.startTime = currentTime;
+    }
     currentTime = addSecondsToTime(currentTime, item.duration || 0);
   });
 }
 
 function removeScheduleItem(id) {
   scheduleItems = scheduleItems.filter(item => item.id !== id);
+  if (preserveScheduleTimes) {
+    let currentTime = scheduleItems[0]?.startTime || document.getElementById('start-time-input').value;
+    scheduleItems.forEach(item => {
+      item.startTime = currentTime;
+      currentTime = addSecondsToTime(currentTime, item.duration || 0);
+    });
+  }
   recalculateTimes();
   updateScheduleUI();
   updateFooter();
@@ -863,6 +990,13 @@ function removeScheduleItem(id) {
 function moveScheduleItem(fromIndex, toIndex) {
   const [moved] = scheduleItems.splice(fromIndex, 1);
   scheduleItems.splice(toIndex, 0, moved);
+  if (preserveScheduleTimes) {
+    let currentTime = scheduleItems[0]?.startTime || document.getElementById('start-time-input').value;
+    scheduleItems.forEach(item => {
+      item.startTime = currentTime;
+      currentTime = addSecondsToTime(currentTime, item.duration || 0);
+    });
+  }
   recalculateTimes();
   updateScheduleUI();
 }
@@ -876,8 +1010,9 @@ function updateScheduleUI() {
 
   clearBtn.disabled = scheduleItems.length === 0;
   saveBtn.disabled = scheduleItems.length === 0 || scheduleItems.some(item => !Number.isSafeInteger(item.duration) || item.duration <= 0);
-  addBreakBtn.disabled = scheduleItems.length === 0;
-  addLiveBtn.disabled = scheduleItems.length === 0;
+  addBreakBtn.disabled = true;
+  addBreakBtn.title = 'Istirahat belum didukung scheduler';
+  addLiveBtn.disabled = false;
   updateScheduleSummary();
 
   if (scheduleItems.length === 0) {
@@ -937,7 +1072,7 @@ function updateScheduleUI() {
           ${item.durationLoading ? 'disabled' : ''}
           data-item-id="${item.id}" title="Format HH:MM:SS">
       </td>
-      <td class="col-type">${getTypeLabel(item.type)}</td>
+      <td class="col-type">${item.missing ? 'File hilang' : getTypeLabel(item.type)}</td>
       <td class="col-actions">
         <button class="btn-icon delete" aria-label="Hapus program" title="Hapus" onclick="removeScheduleItem(${item.id})">
           <img src="/static/assets/delete.svg" alt="">
@@ -950,6 +1085,12 @@ function updateScheduleUI() {
       if (!targetItem) return;
       targetItem.duration = parsedDuration;
       targetItem.durationError = parsedDuration === null;
+      if (preserveScheduleTimes && parsedDuration !== null) {
+        const itemIndex = scheduleItems.indexOf(targetItem);
+        for (let index = itemIndex + 1; index < scheduleItems.length; index++) {
+          scheduleItems[index].startTime = addSecondsToTime(scheduleItems[index - 1].startTime, scheduleItems[index - 1].duration);
+        }
+      }
       recalculateTimes();
       updateScheduleUI();
       updateFooter();
@@ -1108,8 +1249,11 @@ function openSaveModal() {
 
   // Default name: today's date
   const dateInput = document.getElementById('schedule-date');
-  const defaultName = dateInput.value || new Date().toISOString().split('T')[0];
+  const defaultName = editingPlaylistName || dateInput.value || new Date().toISOString().split('T')[0];
   nameInput.value = defaultName;
+  nameInput.readOnly = Boolean(editingPlaylistName);
+  document.getElementById('save-modal-title').textContent = editingPlaylistName ? 'Simpan Perubahan Playlist' : 'Simpan Playlist';
+  document.getElementById('btn-confirm-save').textContent = editingPlaylistName ? 'Simpan Perubahan' : 'Simpan Playlist';
   setCreateMessage('');
   setSaveMessage('');
 
@@ -1136,12 +1280,24 @@ function updateSavePreview() {
 }
 
 async function savePlaylist() {
+  if (scheduleItems.some(item => item.type === 'missing')) {
+    setSaveMessage('Playlist memiliki video yang hilang. Hapus atau ganti video tersebut sebelum menyimpan.', 'error');
+    return;
+  }
+  if (scheduleItems.some(item => item.type === 'break')) {
+    setSaveMessage('Item Istirahat belum didukung scheduler. Hapus sebelum menyimpan.', 'error');
+    return;
+  }
+  if (scheduleItems.some(item => !isValidTimeString(item.startTime))) {
+    setSaveMessage('Jam tayang harus valid dan berada dalam batas 48 jam.', 'error');
+    return;
+  }
   if (scheduleItems.some(item => !Number.isSafeInteger(item.duration) || item.duration <= 0)) {
     setSaveMessage('Isi durasi valid untuk semua program sebelum menyimpan.', 'error');
     return;
   }
   const nameInput = document.getElementById('playlist-name');
-  const name = nameInput.value.trim();
+  const name = editingPlaylistName || nameInput.value.trim();
 
   if (!name) {
     setSaveMessage('Nama playlist wajib diisi.', 'error');
