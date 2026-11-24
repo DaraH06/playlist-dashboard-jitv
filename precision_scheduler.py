@@ -1,30 +1,3 @@
-"""
-Precision (timecode-accurate) playback engine — separate mode from the
-simple "apply a playlist, loop through it" mode.
-
-Given a parsed .playlist schedule (list of timed entries for one
-calendar date), this engine keeps mpv's on-screen output in sync with
-the ACTUAL wall-clock time (WIB), continuously:
-
-  - Figures out which entry SHOULD be playing right now, based on its
-    start time + duration.
-  - If we just turned this mode on mid-day (e.g. system started at
-    11:00 but the schedule's entry started at 10:58), it seeks into
-    that video to the correct position instead of starting from 0:00.
-  - Switches to the next entry exactly when its start time arrives.
-  - Shows a plain black screen (mpv "stop") for: missing files, live
-    segments (not supported yet), gaps with nothing scheduled, or when
-    no precision playlist exists for today at all.
-
-This is intentionally a from-scratch engine, separate from the mpv
-memory-leak mitigation used in simple mode (chunk-restart tied to
-mpv's own playlist-pos) — precision mode never uses mpv's playlist
-feature, so that mechanism can't observe anything here. Instead this
-engine restarts mpv itself every PRECISION_RESTART_EVERY file-switches,
-which is safe because the engine always re-derives the correct file +
-seek position from the wall clock on its very next tick — no separate
-"resume" bookkeeping needed.
-"""
 import json
 import os
 import re
@@ -146,11 +119,19 @@ def load_precision_playlists():
 
 
 def save_precision_playlists(data):
+    temp_file = f"{PRECISION_FILE}.tmp"
     try:
-        with open(PRECISION_FILE, "w") as f:
+        with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(data, f)
-    except OSError:
-        pass
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, PRECISION_FILE)
+    except (OSError, TypeError, ValueError):
+        try:
+            os.remove(temp_file)
+        except OSError:
+            pass
+        raise
 
 
 class PrecisionScheduler:
@@ -173,10 +154,18 @@ class PrecisionScheduler:
         if not name:
             raise ValueError("nama playlist tidak boleh kosong")
         with self._lock:
+            previous = self.playlists.get(date_name)
             self.playlists[date_name] = entries
-            save_precision_playlists(self.playlists)
+            try:
+                save_precision_playlists(self.playlists)
+            except (OSError, TypeError, ValueError):
+                if previous is None:
+                    self.playlists.pop(date_name, None)
+                else:
+                    self.playlists[date_name] = previous
+                raise
         return name
-
+    
     def list_playlists(self):
         with self._lock:
             return {name: len(entries) for name, entries in self.playlists.items()}

@@ -1,4 +1,7 @@
 import os
+import re
+import math
+import subprocess
 import json
 import zipfile
 import io
@@ -6,7 +9,7 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 from mpv_controller import make_controller, VIDEO_ROOT, ALLOWED_EXT, safe_path
-from precision_scheduler import PrecisionScheduler, parse_playlist_text
+from precision_scheduler import PrecisionScheduler, parse_playlist_text, CCTV_LIVE
 
 app = Flask(__name__)
 
@@ -111,6 +114,7 @@ def api_browse():
     """List folders and video files under VIDEO_ROOT/<path>.
     Sandboxed so a crafted path can't escape VIDEO_ROOT."""
     rel_path = request.args.get("path", "")
+    query = request.args.get("q", "").strip().lower()
     try:
         full_dir = safe_path(rel_path)
     except ValueError:
@@ -121,18 +125,26 @@ def api_browse():
 
     folders = []
     files = []
-    try:
-        entries = sorted(os.listdir(full_dir), key=str.lower)
-    except OSError as e:
-        return jsonify({"error": str(e)}), 500
+    if query:
+        # Recursive search across the video library
+        for dirpath, _dirnames, filenames in os.walk(full_dir):
+            for name in filenames:
+                if name.lower().endswith(ALLOWED_EXT) and query in name.lower():
+                    rel = os.path.relpath(os.path.join(dirpath, name), VIDEO_ROOT)
+                    files.append({"name": name, "path": rel.replace("\\", "/")})
+    else:
+        try:
+            entries = sorted(os.listdir(full_dir), key=str.lower)
+        except OSError as e:
+            return jsonify({"error": str(e)}), 500
 
-    for name in entries:
-        full = os.path.join(full_dir, name)
-        entry_rel = os.path.join(rel_path, name).replace("\\", "/").lstrip("/")
-        if os.path.isdir(full):
-            folders.append({"name": name, "path": entry_rel})
-        elif os.path.isfile(full) and name.lower().endswith(ALLOWED_EXT):
-            files.append({"name": name, "path": entry_rel})
+        for name in entries:
+            full = os.path.join(full_dir, name)
+            entry_rel = os.path.join(rel_path, name).replace("\\", "/").lstrip("/")
+            if os.path.isdir(full):
+                folders.append({"name": name, "path": entry_rel})
+            elif os.path.isfile(full) and name.lower().endswith(ALLOWED_EXT):
+                files.append({"name": name, "path": entry_rel})
 
     # breadcrumb segments for the current path
     parts = [p for p in rel_path.split("/") if p]
@@ -148,6 +160,38 @@ def api_browse():
         "folders": folders,
         "files": files,
     })
+
+
+@app.route("/api/video-duration", methods=["POST"])
+@login_required
+def api_video_duration():
+    """Read one selected video's duration without probing the whole library."""
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request tidak valid"}), 400
+    rel_path = data.get("path", "")
+    if not isinstance(rel_path, str) or not rel_path.lower().endswith(ALLOWED_EXT):
+        return jsonify({"error": "Format video tidak didukung"}), 400
+    try:
+        full_path = safe_path(rel_path)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Path video tidak valid"}), 400
+    if not os.path.isfile(full_path):
+        return jsonify({"error": "File video tidak ditemukan"}), 404
+
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", full_path],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        duration = float(result.stdout.strip())
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("Durasi tidak valid")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return jsonify({"error": "Durasi video tidak dapat dibaca"}), 422
+
+    return jsonify({"duration": int(round(duration))})
 
 
 @app.route("/api/import-playlist", methods=["POST"])
@@ -250,6 +294,67 @@ def api_set_fallback_videos():
 @login_required
 def api_list_named_playlists():
     return jsonify(precision.list_playlists())
+
+
+@app.route("/api/named-playlists", methods=["POST"])
+@login_required
+def api_create_named_playlist():
+    data = request.json
+    if not data:
+        return jsonify({"error": "Invalid request"}), 400
+
+    name = data.get('name', '').strip()
+    description = data.get('description', '').strip()
+    items = data.get('items', [])
+
+    if not name:
+        return jsonify({"error": "Nama playlist wajib diisi"}), 400
+
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', name):
+        return jsonify({"error": "Format nama harus yyyy-mm-dd"}), 400
+
+    if not items:
+        return jsonify({"error": "Playlist tidak boleh kosong"}), 400
+
+    # Convert to precision playlist format
+    precision_entries = []
+    for item in items:
+        entry_type = item.get('type', 'video')
+        duration = item.get('duration')
+        if entry_type in ('video', 'break', 'live') and (
+            isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0
+        ):
+            return jsonify({"error": "Semua program harus memiliki durasi positif dalam detik"}), 400
+        if entry_type == 'video':
+            precision_entries.append({
+                'start': time_to_seconds(item.get('start_time', '00:00:00')),
+                'duration': duration,
+                'label': item.get('name', ''),
+                'path': item.get('path', ''),
+                'type': 'video'
+            })
+        elif entry_type == 'break':
+            return jsonify({'error': "Tipe item 'break' tidak didukung dalam playlist presisi"}), 400
+        elif entry_type == 'live':
+            precision_entries.append({
+                'start': time_to_seconds(item.get('start_time', '00:00:00')),
+                'duration': duration,
+                'label': item.get('name', 'Live CCTV'),
+                'type': 'live'
+            })
+
+    saved_name = precision.save_playlist(name, precision_entries)
+    return jsonify({"status": "ok", "name": saved_name})
+
+
+def time_to_seconds(time_str):
+    """Convert HH:MM:SS to total seconds."""
+    parts = time_str.split(':')
+    if len(parts) == 3:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+    elif len(parts) == 2:
+        return int(parts[0]) * 60 + int(parts[1])
+    return 0
 
 
 @app.route("/api/named-playlists/<name>", methods=["DELETE"])
@@ -419,6 +524,103 @@ def api_precision_playlist_detail(date_name):
     if entries is None:
         return jsonify({"error": "Jadwal tidak ditemukan"}), 404
     return jsonify(entries)
+
+# ---------- Create Playlist ----------
+
+@app.route("/create-playlist")
+@login_required
+def create_playlist():
+    return render_template("form.html")
+
+
+@app.route("/api/create-playlist", methods=["POST"])
+@login_required
+def api_save_created_playlist():
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Format permintaan tidak valid"}), 400
+    name = data.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    items = data.get("items")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", name):
+        return jsonify({"error": "Format nama harus yyyy-mm-dd"}), 400
+    try:
+        from datetime import date
+        date.fromisoformat(name)
+    except ValueError:
+        return jsonify({"error": "Tanggal playlist tidak valid"}), 400
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "Playlist tidak boleh kosong"}), 400
+
+    from generate_playlist import seconds_to_timecode
+    rows = []
+    precision_entries = []
+    for item in items:
+        if not isinstance(item, dict):
+            return jsonify({"error": "Format item playlist tidak valid"}), 400
+        kind = item.get("type", "video")
+        duration = item.get("duration")
+        start = item.get("start_time")
+        if kind not in ("video", "live", "break"):
+            return jsonify({"error": "Tipe item playlist tidak valid"}), 400
+        if isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0:
+            return jsonify({"error": "Semua program harus memiliki durasi positif dalam detik"}), 400
+        try:
+            if not isinstance(start, str) or not re.fullmatch(r"\d{2,}:\d{2}:\d{2}", start):
+                raise ValueError
+            hours, minutes, seconds = (int(part) for part in start.split(":"))
+            if minutes > 59 or seconds > 59:
+                raise ValueError
+            start_seconds = hours * 3600 + minutes * 60 + seconds
+            if start_seconds >= 172800:
+                return jsonify({"error": "Jam mulai melebihi batas 48 jam"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "Jam mulai tidak valid"}), 400
+
+        if kind == "video":
+            rel_path = item.get("path")
+            try:
+                full_path = safe_path(rel_path)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Path video tidak valid"}), 400
+            if not os.path.isfile(full_path):
+                return jsonify({"error": f"Video tidak ditemukan: {item.get('name', '')}"}), 400
+            normalized_path = os.path.relpath(full_path, VIDEO_ROOT).replace(os.sep, "/")
+            content = f"UTF8{normalized_path}"
+            precision_entries.append({
+                "start": start_seconds, "duration": duration, "end": start_seconds + duration,
+                "label": os.path.basename(normalized_path), "path": normalized_path, "type": "video",
+            })
+        elif kind == "live":
+            content = "srt://live"
+            precision_entries.append({
+                "start": start_seconds, "duration": duration, "end": start_seconds + duration,
+                "label": CCTV_LIVE, "type": "live",
+            })
+        else:
+            return jsonify({"error": "Tipe item 'break' tidak didukung dalam playlist presisi"}), 400
+
+        rows.append((seconds_to_timecode(start_seconds), seconds_to_timecode(duration), content))
+
+    if not rows:
+        return jsonify({"error": "Playlist harus memiliki video atau segmen live"}), 400
+
+    output_dir = os.path.join(os.path.dirname(__file__), "playlist")
+    output_path = os.path.join(output_dir, f"{name}.playlist")
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8", newline="\n") as playlist_file:
+            for row in rows:
+                playlist_file.write("\t".join(row) + "\n")
+    except OSError as exc:
+        return jsonify({"error": f"Gagal menyimpan file playlist: {exc}"}), 500
+
+    try:
+        precision.save_playlist(name, precision_entries)
+    except (ValueError, OSError, TypeError) as exc:
+        app.logger.exception("Gagal mendaftarkan jadwal playlist %s", name)
+        return jsonify({"error": "Gagal mendaftarkan jadwal playlist"}), 500
+    return jsonify({"status": "ok", "name": name, "path": f"playlist/{name}.playlist"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, threaded=True)

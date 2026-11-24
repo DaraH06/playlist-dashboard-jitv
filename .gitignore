@@ -69,3 +69,8 @@ generate_playlist.py
 
 #log
 *.log
+
+stats_ffmpeg
+docker-compose.yml
+playlist
+stats_ffmpeg
