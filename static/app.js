@@ -354,6 +354,74 @@ function formatSeconds(seconds) {
 
 setInterval(tickTimerDisplay, 1000);
 
+async function loadStreamOutput() {
+  const form = document.getElementById("stream-output-form");
+  if (!form) return;
+  try {
+    const config = await api("/api/stream-output");
+    const mode = document.getElementById("stream-output-mode");
+    const url = document.getElementById("stream-output-url");
+    const key = document.getElementById("stream-youtube-key");
+    if (mode) mode.value = config.mode;
+    if (url) url.value = config.custom_url || "";
+    if (key) key.placeholder = config.youtube_key_set
+      ? "Stream key tersimpan; isi untuk menggantinya"
+      : "Masukkan stream key";
+    toggleStreamOutputFields();
+  } catch (error) {
+    const message = document.getElementById("stream-output-message");
+    if (message) message.textContent = error.message;
+  }
+}
+
+function toggleStreamOutputFields() {
+  const mode = document.getElementById("stream-output-mode");
+  const urlFields = document.getElementById("stream-url-fields");
+  const youtubeFields = document.getElementById("stream-youtube-fields");
+  if (!mode || !urlFields || !youtubeFields) return;
+  const youtube = mode.value === "youtube";
+  urlFields.hidden = youtube;
+  youtubeFields.hidden = !youtube;
+}
+
+async function saveStreamOutput(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = form.querySelector('button[type="submit"]');
+  const message = document.getElementById("stream-output-message");
+  const mode = document.getElementById("stream-output-mode");
+  const url = document.getElementById("stream-output-url");
+  const key = document.getElementById("stream-youtube-key");
+  if (!submit || !message || !mode || !url || !key) return;
+
+  submit.disabled = true;
+  message.textContent = "Menyimpan konfigurasi dan mengganti publisher…";
+  try {
+    const response = await api("/api/stream-output", {
+      method: "POST",
+      body: JSON.stringify({ mode: mode.value, custom_url: url.value.trim(), youtube_key: key.value })
+    });
+    key.value = "";
+    message.textContent = response.publisher_restarted
+      ? "Tersimpan; publisher berhasil direstart."
+      : "Konfigurasi tersimpan.";
+    await loadStreamOutput();
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function initStreamOutput() {
+  const form = document.getElementById("stream-output-form");
+  const mode = document.getElementById("stream-output-mode");
+  if (!form || !mode) return;
+  mode.addEventListener("change", toggleStreamOutputFields);
+  form.addEventListener("submit", saveStreamOutput);
+  loadStreamOutput();
+}
+
 async function pollStatus() {
   const s = await api("/api/status");
   const dot = document.getElementById("status-dot");
@@ -607,6 +675,7 @@ if (!document.body.classList.contains("create-body")) {
   loadNamedPlaylists();
   loadPrecisionStatus();
   loadFallbackVideos();
+  initStreamOutput();
   pollStatus();
   setInterval(pollStatus, 3000);
   setInterval(loadPrecisionStatus, 3000);

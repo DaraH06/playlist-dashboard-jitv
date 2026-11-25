@@ -10,7 +10,7 @@
 
 <body>
   <header>
-    <h1>Raspi Playlist Dashboard</h1>
+    <h1>Playlist Online JITV</h1>
     <a class="logout" href="{{ url_for('logout') }}">Logout</a>
   </header>
 
@@ -32,6 +32,30 @@
       <span id="precision-status-text">Memuat status...</span>
     </div>
     <div id="precision-detail" class="precision-detail"></div>
+  </section>
+
+  <section class="panel stream-output-panel" aria-labelledby="stream-output-title">
+    <h2 id="stream-output-title">Tujuan Output Stream</h2>
+    <form id="stream-output-form">
+      <div class="form-group form-group-mode">
+        <label for="stream-output-mode">Jenis tujuan</label>
+        <select id="stream-output-mode" name="mode">
+          <option value="url">URL RTMP/RTSP</option>
+          <option value="youtube">YouTube</option>
+        </select>
+      </div>
+      <div id="stream-url-fields" class="form-group form-group-url">
+        <label for="stream-output-url">URL RTMP/RTSP</label>
+        <input id="stream-output-url" name="custom_url" type="url" placeholder="rtmp:// atau rtsp://"
+          autocomplete="off">
+      </div>
+      <div id="stream-youtube-fields" class="form-group form-group-key" hidden>
+        <label for="stream-youtube-key">YouTube stream key</label>
+        <input id="stream-youtube-key" name="youtube_key" type="password" autocomplete="new-password">
+      </div>
+      <button class="btn" type="submit">Simpan dan restart publisher</button>
+      <p id="stream-output-message" role="status" aria-live="polite"></p>
+    </form>
   </section>
 
   <section class="fallback-panel">

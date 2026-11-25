@@ -610,6 +610,88 @@ header h1 {
   flex-shrink: 0;
 }
 
+/* Stream output panel */
+.stream-output-panel {
+  width: auto;
+  margin: 0 24px 24px;
+  padding: 16px 24px;
+}
+
+.stream-output-panel h2 {
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+
+#stream-output-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+}
+
+#stream-output-form .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+#stream-output-form label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+#stream-output-form .form-group-mode {
+  flex: 1 1 180px;
+}
+
+#stream-output-form .form-group-url,
+#stream-output-form .form-group-key {
+  flex: 3 1 320px;
+}
+
+#stream-output-form select,
+#stream-output-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 12px;
+  background: #0f1114;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+#stream-output-form button {
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #0c0c0c;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#stream-output-form button:hover {
+  background: var(--accent-hover);
+}
+
+#stream-output-form button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+#stream-output-message {
+  flex-basis: 100%;
+  min-height: 1.3em;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 /* ---------- Panel Video Fallback ---------- */
 .fallback-panel {
   background: var(--panel);

@@ -102,27 +102,30 @@ def _build_source_cmd(input_path, seek_seconds, encoder, fps, loop=False):
             "-avoid_negative_ts", "make_zero"]
 
     # Output to MPEG-TS pipe
-    cmd += ["-fps_mode", "cfr", "-f", "mpegts", "pipe:1"]
+    cmd += ["-fps_mode", "cfr", "-fflags", "+genpts+igndts", "-f", "mpegts", "pipe:1"]
 
     print(f"Source CMD:\n {' '.join(cmd)}", flush=True)
     return cmd
 
 
 def _build_publisher_cmd(rtmp_url):
-    """Publisher process: pipe:0 -> copy -> RTMP."""
+    """Publisher process: pipe:0 -> RTMP/RTMPS FLV or RTSP."""
     cmd = [
         "ffmpeg", "-hide_banner", "-y",
         "-f", "mpegts",
-        "-analyzeduration", "2000000", "-probesize", "5000000",
+        "-analyzeduration", "5000000", "-probesize", "5000000",
+        "-fflags", "+genpts+igndts",
         "-i", "pipe:0",
         "-c:v", "copy",
         "-bsf:v", "h264_mp4toannexb",
         "-c:a", "copy",
         "-max_interleave_delta", "0",
         "-fflags", "+genpts+igndts",
-        "-f", "flv", rtmp_url
     ]
-    print(f"Publisher CMD:\n {' '.join(cmd)}", flush=True)
+    if rtmp_url.startswith("rtsp://"):
+        cmd += ["-f", "rtsp", "-rtsp_transport", "tcp", rtmp_url]
+    else:
+        cmd += ["-f", "flv", rtmp_url]
     return cmd
 
 
@@ -187,7 +190,9 @@ def _read_stream_stderr(proc_ref, logger_obj, error_logger_obj, prefix="[FFmpeg]
         except Exception:
             pass
 
-    threading.Thread(target=_reader, daemon=True).start()
+    thread = threading.Thread(target=_reader, daemon=True)
+    thread.start()
+    return thread
 
 # ---------------------------------------------------------------------------
 # FFmpegController
@@ -209,6 +214,7 @@ class FFmpegController:
         self._source_proc    = None        # Transient file/stream source
         self._bridge_thread  = None
         self._stop_bridge    = False
+        self._stderr_threads = {}
 
         self._playlist     = []            # list full path
         self._index        = None          # index saat ini di playlist
@@ -251,18 +257,61 @@ class FFmpegController:
                     with self._lock:
                          self._last_error = msg
 
-                _read_stream_stderr(
-                     proc_ref=pub_ref,
-                     logger_obj=pub_debug,           # Ke stats_ffmpeg_pub.log
-                     error_logger_obj=ffmpeg_logger, # Ke log_ffmpeg.log
-                     prefix="[Pub]",
-                     update_error_cb=_update_pub_error
-                 )
+                self._stderr_threads["publisher"] = _read_stream_stderr(
+                    proc_ref=pub_ref,
+                    logger_obj=pub_debug,
+                    error_logger_obj=ffmpeg_logger,
+                    prefix="[Pub]",
+                    update_error_cb=_update_pub_error
+                )
 
             except Exception as e:
                 ffmpeg_logger.critical(f"CRITICAL: Failed to start publisher: {e}")
                 self._last_error = f"Failed to start publisher: {e}"
                 self._publisher_proc = None
+
+    @staticmethod
+    def _stop_process(proc):
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        else:
+            proc.wait()
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            if pipe:
+                try:
+                    pipe.close()
+                except OSError:
+                    pass
+
+    def _stop_publisher(self):
+        proc = self._publisher_proc
+        self._publisher_proc = None
+        if proc is not None:
+            self._stop_process(proc)
+        reader = self._stderr_threads.pop("publisher", None)
+        if reader and reader is not threading.current_thread():
+            reader.join(timeout=2)
+
+    def change_output(self, output_url):
+        """Restart publisher on new URL without restarting active source."""
+        with self._lock:
+            if output_url == self.rtmp_url:
+                return
+            self._stop_publisher()
+            self.rtmp_url = output_url
+            self._ensure_publisher()
+            if self._publisher_proc is None or self._publisher_proc.poll() is not None:
+                raise RuntimeError("Publisher gagal dimulai")
+            self._stop_bridge = False
+            if self._source_proc is not None and self._source_proc.poll() is None:
+                if self._bridge_thread is None or not self._bridge_thread.is_alive():
+                    self._bridge_thread = threading.Thread(target=self._bridge_loop, daemon=True)
+                    self._bridge_thread.start()
 
     def _kill_source(self):
         """Hentikan proses source aktif."""
@@ -323,12 +372,12 @@ class FFmpegController:
                     if self._source_proc is src_ref:
                        self._last_error = msg
 
-            _read_stream_stderr(
-                 proc_ref=src_ref,
-                 logger_obj=src_debug,           # Ke stats_ffmpeg_src.log
-                 error_logger_obj=ffmpeg_logger, # Ke log_ffmpeg.log
-                 prefix="[Source]",
-                 update_error_cb=_update_src_error
+            self._stderr_threads["source"] = _read_stream_stderr(
+                proc_ref=src_ref,
+                logger_obj=src_debug,
+                error_logger_obj=ffmpeg_logger,
+                prefix="[Source]",
+                update_error_cb=_update_src_error
             )
 
             # Start bridge thread if not running
@@ -343,24 +392,21 @@ class FFmpegController:
 
         while not self._stop_bridge:
             src = None
-            pub = None
             with self._lock:
                 src = self._source_proc
-                pub = self._publisher_proc
 
-            if src and pub and src.poll() is None:
+            if src and src.poll() is None:
                 try:
                     # Higher buffer for smooth playback
                     data = src.stdout.read(int(CHUNK_ALIGN))
-                    if data:
-                        try:
-                            pub.stdin.write(data)
-                            pub.stdin.flush()
-                        except (BrokenPipeError, OSError):
-                            ffmpeg_logger.info("Bridge: Publisher pipe broken, restarting...")
-                            self._ensure_publisher()
-                    else:
+                    if not data:
                         time.sleep(0.01)
+                        continue
+                    with self._lock:
+                        publisher = self._publisher_proc
+                        if self._source_proc is src and publisher and publisher.poll() is None and publisher.stdin:
+                            publisher.stdin.write(data)
+                            publisher.stdin.flush()
                 except Exception as e:
                     time.sleep(0.1)
             else:
@@ -477,6 +523,8 @@ class FFmpegController:
 
             return {
                 "running":              src_alive and pub_alive,
+                "source_alive":         src_alive,
+                "publisher_alive":      pub_alive,
                 "paused":               self._paused,
                 "current_file":         current_file,
                 "playlist_index":       self._index,
