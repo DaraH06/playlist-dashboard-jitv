@@ -50,6 +50,35 @@ def save_settings(settings):
     os.replace(temporary_path, SETTINGS_FILE)
 
 
+def is_valid_stream_url(url):
+    if not isinstance(url, str) or not url:
+        return False
+    from urllib.parse import urlsplit
+    try:
+        parsed = urlsplit(url)
+        return parsed.scheme in ("rtmp", "rtmps", "rtsp") and bool(parsed.netloc) and parsed.hostname is not None
+    except ValueError:
+        return False
+
+
+def get_stream_output_config():
+    config = load_settings().get("stream_output", {})
+    if not isinstance(config, dict):
+        config = {}
+    mode = config.get("mode", "url")
+    key = config.get("youtube_key", "")
+    ingest = config.get("youtube_ingest_url", YOUTUBE_INGEST_URL)
+    custom_url = config.get("custom_url", "")
+    fallback_url = os.environ.get("RTMP_TARGET", "")
+    if mode == "youtube" and isinstance(key, str) and key:
+        active_url = f"{ingest}/{key}"
+    elif is_valid_stream_url(custom_url):
+        active_url = custom_url
+    else:
+        active_url = fallback_url if is_valid_stream_url(fallback_url) else ""
+    return config, mode, key, custom_url, active_url
+
+
 def redact_stream_url(url):
     from urllib.parse import urlsplit, urlunsplit
     parts = urlsplit(url)
@@ -60,7 +89,8 @@ def redact_stream_url(url):
         host += f":{parts.port}"
     return urlunsplit((parts.scheme, f"{parts.username or '***'}:***@{host}", parts.path, parts.query, parts.fragment))
 
-mpv = make_controller()
+_, _, _, _, startup_output_url = get_stream_output_config()
+mpv = make_controller(rtmp_url=startup_output_url)
 
 def resolve_playlist_paths(items):
     """Turn a list of relative paths into full paths, silently
@@ -323,12 +353,8 @@ def api_set_fallback_videos():
 @app.route("/api/stream-output", methods=["GET"])
 @login_required
 def api_get_stream_output():
-    config = load_settings().get("stream_output", {})
-    mode = config.get("mode", "url")
-    key = config.get("youtube_key", "")
-    custom_url = config.get("custom_url", "")
+    config, mode, key, custom_url, active_url = get_stream_output_config()
     ingest = config.get("youtube_ingest_url", YOUTUBE_INGEST_URL)
-    active_url = f"{ingest}/{key}" if mode == "youtube" and key else custom_url
     return jsonify({"mode": mode, "custom_url": custom_url, "youtube_key_set": bool(key), "active_url": redact_stream_url(active_url) if active_url else ""})
 
 
@@ -344,29 +370,32 @@ def api_set_stream_output():
     if mode not in ("url", "youtube") or not isinstance(key, str) or not isinstance(custom_url, str):
         return jsonify({"error": "Konfigurasi output tidak valid"}), 400
     key, custom_url = key.strip(), custom_url.strip()
-    if mode == "url":
-        from urllib.parse import urlsplit
-        parsed = urlsplit(custom_url)
-        if parsed.scheme not in ("rtmp", "rtmps", "rtsp") or not parsed.netloc or parsed.hostname is None:
-            return jsonify({"error": "Masukkan URL RTMP, RTMPS, atau RTSP yang valid"}), 400
-    elif not key or len(key) > 256 or any(char.isspace() for char in key):
+    if mode == "url" and custom_url and not is_valid_stream_url(custom_url):
+        return jsonify({"error": "Masukkan URL RTMP, RTMPS, atau RTSP yang valid"}), 400
+    if mode == "youtube" and (not key or len(key) > 256 or any(char.isspace() for char in key)):
         return jsonify({"error": "Stream key YouTube tidak valid"}), 400
 
     settings = load_settings()
     config = settings.get("stream_output", {})
+    if not isinstance(config, dict):
+        config = {}
     old_mode = config.get("mode", "url")
-    old_url = config.get("custom_url", "")
     old_key = config.get("youtube_key", "")
     ingest = os.environ.get("YOUTUBE_INGEST_URL", YOUTUBE_INGEST_URL).rstrip("/")
-    old_active = f"{ingest}/{old_key}" if old_mode == "youtube" and old_key else old_url
+    old_active = f"{ingest}/{old_key}" if old_mode == "youtube" and old_key else get_stream_output_config()[4]
     active_url = f"{ingest}/{key}" if mode == "youtube" else custom_url
     config.update({"mode": mode, "youtube_key": key, "custom_url": custom_url, "youtube_ingest_url": ingest})
     settings["stream_output"] = config
     try:
         save_settings(settings)
+        new_active_url = active_url if mode == "youtube" else (
+            custom_url if is_valid_stream_url(custom_url) else os.environ.get("RTMP_TARGET", "")
+        )
+        if not is_valid_stream_url(new_active_url):
+            new_active_url = ""
         restarted = False
-        if active_url != old_active and active_url and hasattr(mpv, "change_output"):
-            mpv.change_output(active_url)
+        if new_active_url != old_active and new_active_url and hasattr(mpv, "change_output"):
+            mpv.change_output(new_active_url)
             restarted = True
     except (OSError, RuntimeError) as error:
         return jsonify({"error": f"Gagal menyimpan atau mengganti publisher: {error}"}), 500
@@ -615,7 +644,8 @@ def api_precision_playlist_detail(date_name):
 @app.route("/create-playlist")
 @login_required
 def create_playlist():
-    return render_template("form.html")
+    from precision_scheduler import CCTV_LIVE
+    return render_template("form.html", cctv_live=CCTV_LIVE)
 
 
 @app.route("/api/create-playlist", methods=["POST"])

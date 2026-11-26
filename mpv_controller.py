@@ -408,7 +408,7 @@ class MockMPVController:
             self._duration = 0.0
             self._paused   = True
 
-def make_controller():
+def make_controller(rtmp_url=None):
 
     """Pilih controller yang tepat berdasarkan environment:
 
@@ -419,22 +419,20 @@ def make_controller():
     player = os.environ.get("MEDIA_PLAYER", "").lower()
 
     if player == "ffmpeg":
-        rtmp_url = os.environ.get("RTMP_TARGET") or os.environ.get("DASHBOARD_RTMP_URL", "")
-        if not rtmp_url:
+        encoder = os.environ.get("ENCODER", "libx264")
+        fps     = os.environ.get("FPS", "25")
+        resolved_url = rtmp_url or os.environ.get("RTMP_TARGET") or os.environ.get("DASHBOARD_RTMP_URL", "")
+        if not resolved_url:
             raise RuntimeError(
                 "DASHBOARD_PLAYER=ffmpeg tapi RTMP_TARGET tidak diset. "
                 "Set RTMP_TARGET ke URL RTMP tujuan (mis. rtmp://127.0.0.1:1935/live/jitv)."
             )
-        encoder = os.environ.get("ENCODER", "libx264")
-        fps     = os.environ.get("FPS", "25")
         print(f"[dashboard] backend  : ffmpeg", flush=True)
         print(f"[dashboard] encoder  : {encoder}", flush=True)
-        print(f"[dashboard] rtmp     : {rtmp_url}", flush=True)
+        print(f"[dashboard] rtmp     : {resolved_url}", flush=True)
         print(f"[dashboard] fps      : {fps}", flush=True)
-        # Import di sini untuk menghindari circular import saat mpv_controller
-        # di-import oleh ffmpeg_controller itu sendiri.
         from ffmpeg_controller import FFmpegController
-        return FFmpegController(rtmp_url=rtmp_url, encoder=encoder, fps=fps)
+        return FFmpegController(rtmp_url=resolved_url, encoder=encoder, fps=fps)
 
     if player == "mpv":
         _backend = "mpv (mock)" if (os.name == "nt" or os.environ.get("DASHBOARD_MOCK") == "1") else "mpv"

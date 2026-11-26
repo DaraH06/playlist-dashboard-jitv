@@ -400,7 +400,11 @@ class PrecisionScheduler:
                 if key != self._current_entry_key:
                     should_switch = True
                 elif not self.controller.is_running():
-                    should_switch = True
+                    finished = getattr(self.controller, "consume_duration_finished", lambda: False)()
+                    if not finished and now_sec < active["end"]:
+                        should_switch = True
+                    else:
+                        self._current_entry_key = (today_name, active["end"])
                 if should_switch:
                     current_duration = active['duration']
 
