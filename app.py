@@ -29,6 +29,37 @@ print(f"pass : {ADMIN_PASSWORD_HASH}", flush=True)
 PLAYLIST_FILE = os.path.join(os.path.dirname(__file__), "playlist.json")
 FALLBACK_FILE = os.path.join(os.path.dirname(__file__), "fallback_videos.json")
 
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+YOUTUBE_INGEST_URL = os.environ.get("YOUTUBE_INGEST_URL", "rtmps://a.rtmps.youtube.com/live2")
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as file:
+            settings = json.load(file)
+        return settings if isinstance(settings, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_settings(settings):
+    temporary_path = SETTINGS_FILE + ".tmp"
+    with open(temporary_path, "w", encoding="utf-8") as file:
+        json.dump(settings, file, indent=2)
+        file.write("\n")
+    os.replace(temporary_path, SETTINGS_FILE)
+
+
+def redact_stream_url(url):
+    from urllib.parse import urlsplit, urlunsplit
+    parts = urlsplit(url)
+    if not parts.password:
+        return url
+    host = parts.hostname or ""
+    if parts.port:
+        host += f":{parts.port}"
+    return urlunsplit((parts.scheme, f"{parts.username or '***'}:***@{host}", parts.path, parts.query, parts.fragment))
+
 mpv = make_controller()
 
 def resolve_playlist_paths(items):
@@ -286,6 +317,60 @@ def api_set_fallback_videos():
             valid.append(rel)
     save_fallback_data(valid)
     return jsonify({"status": "ok", "items": valid})
+
+
+# ---------- stream output ----------
+@app.route("/api/stream-output", methods=["GET"])
+@login_required
+def api_get_stream_output():
+    config = load_settings().get("stream_output", {})
+    mode = config.get("mode", "url")
+    key = config.get("youtube_key", "")
+    custom_url = config.get("custom_url", "")
+    ingest = config.get("youtube_ingest_url", YOUTUBE_INGEST_URL)
+    active_url = f"{ingest}/{key}" if mode == "youtube" and key else custom_url
+    return jsonify({"mode": mode, "custom_url": custom_url, "youtube_key_set": bool(key), "active_url": redact_stream_url(active_url) if active_url else ""})
+
+
+@app.route("/api/stream-output", methods=["POST"])
+@login_required
+def api_set_stream_output():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Format permintaan tidak valid"}), 400
+    mode = payload.get("mode")
+    key = payload.get("youtube_key", "")
+    custom_url = payload.get("custom_url", "")
+    if mode not in ("url", "youtube") or not isinstance(key, str) or not isinstance(custom_url, str):
+        return jsonify({"error": "Konfigurasi output tidak valid"}), 400
+    key, custom_url = key.strip(), custom_url.strip()
+    if mode == "url":
+        from urllib.parse import urlsplit
+        parsed = urlsplit(custom_url)
+        if parsed.scheme not in ("rtmp", "rtmps", "rtsp") or not parsed.netloc or parsed.hostname is None:
+            return jsonify({"error": "Masukkan URL RTMP, RTMPS, atau RTSP yang valid"}), 400
+    elif not key or len(key) > 256 or any(char.isspace() for char in key):
+        return jsonify({"error": "Stream key YouTube tidak valid"}), 400
+
+    settings = load_settings()
+    config = settings.get("stream_output", {})
+    old_mode = config.get("mode", "url")
+    old_url = config.get("custom_url", "")
+    old_key = config.get("youtube_key", "")
+    ingest = os.environ.get("YOUTUBE_INGEST_URL", YOUTUBE_INGEST_URL).rstrip("/")
+    old_active = f"{ingest}/{old_key}" if old_mode == "youtube" and old_key else old_url
+    active_url = f"{ingest}/{key}" if mode == "youtube" else custom_url
+    config.update({"mode": mode, "youtube_key": key, "custom_url": custom_url, "youtube_ingest_url": ingest})
+    settings["stream_output"] = config
+    try:
+        save_settings(settings)
+        restarted = False
+        if active_url != old_active and active_url and hasattr(mpv, "change_output"):
+            mpv.change_output(active_url)
+            restarted = True
+    except (OSError, RuntimeError) as error:
+        return jsonify({"error": f"Gagal menyimpan atau mengganti publisher: {error}"}), 500
+    return jsonify({"status": "ok", "publisher_restarted": restarted})
 
 
 # ---------- named playlists----------

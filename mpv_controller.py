@@ -419,7 +419,7 @@ def make_controller():
     player = os.environ.get("MEDIA_PLAYER", "").lower()
 
     if player == "ffmpeg":
-        rtmp_url = os.environ.get("RTMP_TARGET", "")
+        rtmp_url = os.environ.get("RTMP_TARGET") or os.environ.get("DASHBOARD_RTMP_URL", "")
         if not rtmp_url:
             raise RuntimeError(
                 "DASHBOARD_PLAYER=ffmpeg tapi RTMP_TARGET tidak diset. "
