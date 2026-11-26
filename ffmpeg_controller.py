@@ -224,6 +224,7 @@ class FFmpegController:
         self._last_error   = None          # string error terakhir / None
         self._current_duration_sec = None
         self._current_duration_str = "--:--"
+        self._duration_finished = False
         self._watcher_started = False
 
         self._ensure_publisher()
@@ -427,6 +428,12 @@ class FFmpegController:
                 return False
             return self._index is None or not self._playlist
 
+    def consume_duration_finished(self):
+        with self._lock:
+            finished = self._duration_finished
+            self._duration_finished = False
+            return finished
+
     # ------------------------------------------------------------------
     # Public playback API
     # ------------------------------------------------------------------
@@ -471,6 +478,7 @@ class FFmpegController:
             self._paused     = False
             self._loop_file  = bool(loop)
             self._current_duration_sec = duration
+            self._duration_finished = False
             if duration is not None:
                 self._current_duration_str = format_duration(duration)
             self._start_proc(full_path, seek_seconds=seek_seconds, loop=loop)
@@ -581,22 +589,39 @@ class FFmpegController:
                 if poll_result is None:
                     if not self._paused:
                         self._time_pos += elapsed
-                    continue
-
-                exit_code = poll_result
-                self._source_proc = None
-
-                if self._index is not None:
-                    # Video selesai normal -> next
-                    self._current_duration_sec = None
-                    self._current_duration_str = "--:--"
-                    if (not self._loop_file and self._index is not None
-                            and self._index + 1 < len(self._playlist)):
-                        action = ("next",)
-                    elif self._loop_file and self._index is not None and self._playlist:
-                        action = ("loop",)
+                    if (self._current_duration_sec is not None
+                            and self._time_pos >= self._current_duration_sec):
+                        self._kill_source()
+                        self._source_proc = None
+                        self._current_duration_sec = None
+                        self._current_duration_str = "--:--"
+                        self._index = None
+                        self._time_pos = 0.0
+                        self._loop_file = False
+                        self._paused = False
+                        self._duration_finished = True
                     else:
-                        action = ("idle",)
+                        continue
+                else:
+                    exit_code = poll_result
+                    self._source_proc = None
+
+                    if self._index is not None:
+                        self._current_duration_sec = None
+                        self._current_duration_str = "--:--"
+                        if (not self._loop_file and self._index + 1 < len(self._playlist)):
+                            action = ("next",)
+                        elif self._loop_file and self._playlist:
+                            action = ("loop",)
+                        else:
+                            action = ("idle",)
+
+                if action and action[0] == "idle":
+                    self._index = None
+                    self._time_pos = 0.0
+                    self._loop_file = False
+                    self._paused = False
+                    continue
 
             if action and action[0] == "next":
                 with self._lock:

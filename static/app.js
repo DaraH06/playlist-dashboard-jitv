@@ -3,6 +3,7 @@ const browseCache = new Map();
 const browseErrors = new Map();
 const expandedFolders = new Set();
 let fallbackVideos = [];
+const cctvLive = JSON.parse(document.documentElement.dataset.cctvLive || '""');
 
 let timerBaseline = { elapsedSec: null, durationSec: null, atMs: null, paused: true };
 
@@ -296,7 +297,7 @@ function renderQueueList(elementId, items, emptyLabel) {
 
 function renderNowPlayingTimer(s) {
   const el = document.getElementById("now-playing-timer");
-  if (!s.running || s.current_time_pos == null) {
+  if (!s.running || s.current_time_pos == null || !Number.isFinite(s.current_duration_sec) || s.current_duration_sec <= 0) {
     el.innerHTML = "";
     timerBaseline = { elapsedSec: null, durationSec: null, atMs: null, paused: true };
     return;
@@ -434,6 +435,7 @@ async function pollStatus() {
     renderQueueList("queue-playing", [], "Tidak ada yang sedang diputar");
     renderQueueList("queue-upcoming", [], "Belum ada playlist aktif");
     document.getElementById("now-playing-timer").innerHTML = "";
+    timerBaseline = { elapsedSec: null, durationSec: null, atMs: null, paused: true };
     return;
   }
 
@@ -447,6 +449,10 @@ async function pollStatus() {
     renderQueueList("queue-played", t.played, "Belum ada video yang diputar");
     renderQueueList("queue-playing", t.playing, "Tidak ada yang sedang diputar");
     renderQueueList("queue-upcoming", t.upcoming, "Belum ada jadwal berikutnya hari ini");
+    if (!t.playing || t.playing.length === 0) {
+      document.getElementById("now-playing-timer").innerHTML = "";
+      timerBaseline = { elapsedSec: null, durationSec: null, atMs: null, paused: true };
+    }
   } else {
     const played = s.playlist.filter((it) => it.state === "played");
     const playing = s.playlist.filter((it) => it.state === "playing");
@@ -834,6 +840,7 @@ function initCreatePage() {
   previousEditStartTime = null;
   browseTo("");
   loadCreateFallbackVideos();
+  renderCctvChoices();
   setupEventListeners();
   updateScheduleUI();
   updateFooter();
@@ -1032,6 +1039,24 @@ function setupEventListeners() {
       if (scheduleItems.length > 0) openSaveModal();
     }
   });
+}
+
+function renderCctvChoices() {
+  const list = document.getElementById('cctv-list');
+  if (!list) return;
+  list.replaceChildren();
+  const item = document.createElement('li');
+  const name = document.createElement('span');
+  name.className = 'file-name';
+  name.textContent = cctvLive ? `Live CCTV (${cctvLive})` : 'Live CCTV';
+  name.title = cctvLive;
+  item.draggable = true;
+  item.dataset.cctvUrl = cctvLive;
+  item.addEventListener('dragstart', handleCctvDragStart);
+  item.addEventListener('dragend', handleFallbackDragEnd);
+  item.addEventListener('dblclick', addLiveToSchedule);
+  item.append(name);
+  list.appendChild(item);
 }
 
 function addLiveToSchedule() {
@@ -1392,6 +1417,15 @@ function handleFallbackDragEnd(e) {
   e.currentTarget.style.opacity = '';
 }
 
+function handleCctvDragStart(e) {
+  e.dataTransfer.effectAllowed = 'copy';
+  e.dataTransfer.setData('text/plain', JSON.stringify({
+    type: 'live',
+    cctvUrl: e.currentTarget.dataset.cctvUrl
+  }));
+  e.currentTarget.style.opacity = '0.5';
+}
+
 // Drop zone (create page only)
 const scheduleWrapper = document.getElementById('schedule-table-wrapper');
 if (scheduleWrapper) {
@@ -1413,7 +1447,9 @@ if (scheduleWrapper) {
 
     try {
       const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-      if (data && data.path) {
+      if (data?.type === 'live') {
+        addLiveToSchedule();
+      } else if (data && data.path) {
         addVideoToSchedule(data);
       }
     } catch (err) { }
