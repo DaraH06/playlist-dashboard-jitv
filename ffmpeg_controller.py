@@ -227,6 +227,8 @@ class FFmpegController:
         self._duration_finished = False
         self._watcher_started = False
         self._pending_rtmp_url = None      # New output URL to apply at next source boundary
+        self._cutover_pause_until = 0.0
+        self._cutover_lock = threading.Lock()
 
         self._ensure_publisher()
         self._ensure_watcher()
@@ -315,19 +317,29 @@ class FFmpegController:
                 return
             ffmpeg_logger.info(f"Publisher switched to {output_url!r}")
 
-    def change_output(self, output_url):
-        """Schedule output URL change for the next safe source boundary."""
+    def apply_output_change_at_boundary(self, boundary_reason=""):
+        """Apply pending output change at a safe boundary."""
         with self._lock:
-            if output_url == self.rtmp_url:
-                self._pending_rtmp_url = None
-                return
-            if output_url == self._pending_rtmp_url:
-                return
-            self._pending_rtmp_url = output_url
-            if self._source_proc is None or self._source_proc.poll() is not None:
+            if self._pending_rtmp_url is None or self._loop_file or self._current_source_is_live():
+                return False
+            if self._source_proc is not None and self._source_proc.poll() is None:
+                return False
+            self._apply_pending_output()
+            return True
+
+    def change_output(self, output_url):
+        """Immediately replace publisher, then pause source-to-publisher bridge for 30 seconds."""
+        with self._cutover_lock:
+            with self._lock:
+                if output_url == self.rtmp_url:
+                    return
+                self._pending_rtmp_url = output_url
                 self._apply_pending_output()
-                return
-            ffmpeg_logger.info(f"Scheduled output URL change to {output_url!r} (will apply at next source boundary)")
+                publisher = self._publisher_proc
+                if publisher is None or publisher.poll() is not None:
+                    raise RuntimeError("Publisher gagal dimulai")
+                self._cutover_pause_until = time.monotonic() + 30.0
+                ffmpeg_logger.info("Output publisher changed; bridge paused for 30 seconds")
 
     def output_change_pending(self):
         with self._lock:
@@ -467,29 +479,37 @@ class FFmpegController:
                 self._bridge_thread.start()
 
     def _bridge_loop(self):
-        """Jembatan data dari source.stdout ke publisher.stdin."""
-        CHUNK_ALIGN = os.environ.get("CHUNK_ALIGN", "42112")
+        """Bridge source data to publisher, pausing briefly after output cutover."""
+        chunk_size = int(os.environ.get("CHUNK_ALIGN", "42112"))
 
         while not self._stop_bridge:
-            src = None
             with self._lock:
-                src = self._source_proc
+                source = self._source_proc
+                publisher = self._publisher_proc
+                pause_until = self._cutover_pause_until
 
-            if src and src.poll() is None:
-                try:
-                    # Higher buffer for smooth playback
-                    data = src.stdout.read(int(CHUNK_ALIGN))
-                    if not data:
-                        time.sleep(0.01)
-                        continue
+            if time.monotonic() < pause_until:
+                time.sleep(min(0.1, pause_until - time.monotonic()))
+                continue
+
+            if source is None or source.poll() is not None or publisher is None or publisher.poll() is not None:
+                time.sleep(0.1)
+                continue
+
+            try:
+                data = source.stdout.read(chunk_size)
+                if not data:
+                    time.sleep(0.01)
+                    continue
+                with self._cutover_lock:
                     with self._lock:
-                        publisher = self._publisher_proc
-                        if self._source_proc is src and publisher and publisher.poll() is None and publisher.stdin:
+                        if self._source_proc is not source or self._publisher_proc is not publisher:
+                            continue
+                        if publisher.poll() is None and publisher.stdin:
                             publisher.stdin.write(data)
                             publisher.stdin.flush()
-                except Exception as e:
-                    time.sleep(0.1)
-            else:
+            except (BrokenPipeError, OSError, ValueError) as error:
+                ffmpeg_logger.warning(f"Bridge write failed: {error}")
                 time.sleep(0.1)
 
     def is_running(self):

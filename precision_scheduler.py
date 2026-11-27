@@ -25,7 +25,7 @@ except Exception:
 _BROADCAST_START_HOUR_DEFAULT = 6
 
 PRECISION_FILE = os.path.join(os.path.dirname(__file__), "precision_playlists.json")
-TICK_SECONDS = 2
+TICK_SECONDS = 30
 CCTV_LIVE = os.environ.get("CCTV_RTMP", "rtmp://172.16.16.222:1935/live/livecctv")
 TIMECODE_RE = re.compile(r"^(\d+):(\d{2}):(\d{2}):(\d{2})$")
 
