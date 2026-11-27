@@ -393,13 +393,18 @@ def api_set_stream_output():
         )
         if not is_valid_stream_url(new_active_url):
             new_active_url = ""
-        restarted = False
+        pending = False
         if new_active_url != old_active and new_active_url and hasattr(mpv, "change_output"):
             mpv.change_output(new_active_url)
-            restarted = True
+            pending = True
     except (OSError, RuntimeError) as error:
         return jsonify({"error": f"Gagal menyimpan atau mengganti publisher: {error}"}), 500
-    return jsonify({"status": "ok", "publisher_restarted": restarted})
+    return jsonify({
+        "status": "ok",
+        "publisher_restarted": False,
+        "publisher_pending": pending and getattr(mpv, "output_change_pending", lambda: False)(),
+        "publisher_waiting_for_boundary": pending and getattr(mpv, "output_change_waiting_for_boundary", lambda: False)(),
+    })
 
 
 # ---------- named playlists----------
