@@ -328,29 +328,34 @@ class FFmpegController:
             return True
 
     def change_output(self, output_url):
-        """Immediately replace publisher, then pause source-to-publisher bridge for 30 seconds."""
+        """Queue publisher replacement until source reaches a safe boundary."""
         with self._cutover_lock:
             with self._lock:
                 if output_url == self.rtmp_url:
                     return
                 self._pending_rtmp_url = output_url
-                self._apply_pending_output()
-                publisher = self._publisher_proc
-                if publisher is None or publisher.poll() is not None:
-                    raise RuntimeError("Publisher gagal dimulai")
-                self._cutover_pause_until = time.monotonic() + 30.0
-                ffmpeg_logger.info("Output publisher changed; bridge paused for 30 seconds")
+                source = self._source_proc
+                if source is None or source.poll() is not None:
+                    self._apply_pending_output()
+                    return
+                ffmpeg_logger.info("Output publisher change pending at source boundary")
+
+    def _switch_output_and_restart(self):
+        position = self._time_pos
+        current_path = self._playlist[self._index]
+        self._kill_source()
+        self._source_proc = None
+        self._apply_pending_output()
+        self._time_pos = position
+        self._start_proc(current_path, seek_seconds=position, loop=self._loop_file)
+        self._cutover_pause_until = 0.0
+        ffmpeg_logger.info("Output publisher changed; source restarted at keyframe")
+
+
 
     def output_change_pending(self):
         with self._lock:
             return self._pending_rtmp_url is not None and self._source_proc is not None and self._source_proc.poll() is None
-
-    def _source_is_live(self, input_path):
-        return input_path.startswith(("rtmp://", "rtmps://", "rtsp://", "srt://", "http://", "https://"))
-
-    def _current_source_is_live(self):
-        with self._lock:
-            return bool(self._playlist and self._index is not None and self._source_is_live(self._playlist[self._index]))
 
     def output_change_waiting_for_boundary(self):
         with self._lock:
@@ -360,39 +365,9 @@ class FFmpegController:
         with self._lock:
             return self._pending_rtmp_url is not None
 
-    def output_change_pending(self):
-        with self._lock:
-            return self._pending_rtmp_url is not None and self._source_proc is not None and self._source_proc.poll() is None
-
-    def _source_is_live(self, input_path):
-        return input_path.startswith(("rtmp://", "rtmps://", "rtsp://", "srt://", "http://", "https://"))
-
-    def _current_source_is_live(self):
-        with self._lock:
-            return bool(self._playlist and self._index is not None and self._source_is_live(self._playlist[self._index]))
-
-    def output_change_waiting_for_boundary(self):
-        with self._lock:
-            return self._pending_rtmp_url is not None and (
-                self._loop_file or self._current_source_is_live()
-            )
-
-    def pending_output(self):
-        with self._lock:
-            return self._pending_rtmp_url is not None
-
-    def output_change_pending(self):
-        return self.pending_output() and self._source_proc is not None and self._source_proc.poll() is None
-
     def pending_output_url(self):
         with self._lock:
             return self._pending_rtmp_url
-
-    def output_change_waiting_for_boundary(self):
-        with self._lock:
-            return self._pending_rtmp_url is not None and (
-                self._loop_file or self._current_source_is_live()
-            )
 
     def _source_is_live(self, input_path):
         return input_path.startswith(("rtmp://", "rtmps://", "rtsp://", "srt://", "http://", "https://"))
@@ -403,7 +378,8 @@ class FFmpegController:
 
     def _pending_at_idle(self):
         with self._lock:
-            return self._pending_rtmp_url is not None and not self._loop_file and not self._current_source_is_live() and self._source_proc is None
+            return self._pending_rtmp_url is not None and not self._loop_file and not self._current_source_is_live() and (self._source_proc is None or self._source_proc.poll() is not None)
+
 
     def _kill_source(self):
         """Hentikan proses source aktif."""
@@ -726,7 +702,7 @@ class FFmpegController:
                     with self._lock:
                         if (self._index is not None and self._index + 1 < len(self._playlist)):
                             if self._pending_rtmp_url is not None:
-                                self._apply_pending_output()
+                                self._switch_output_and_restart()
                             self._index += 1
                             self._time_pos = 0.0
                             self._start_proc(self._playlist[self._index])
@@ -735,6 +711,6 @@ class FFmpegController:
                     with self._lock:
                         if self._index is not None and self._playlist:
                             if self._pending_rtmp_url is not None:
-                                self._apply_pending_output()
+                                self._switch_output_and_restart()
                             self._time_pos = 0.0
                             self._start_proc(self._playlist[self._index], loop=True)
