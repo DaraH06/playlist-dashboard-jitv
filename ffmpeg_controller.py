@@ -228,6 +228,7 @@ class FFmpegController:
         self._watcher_started = False
         self._pending_rtmp_url = None      # New output URL to apply at next source boundary
         self._cutover_pause_until = 0.0
+        self._cutover_in_progress = False
         self._cutover_lock = threading.Lock()
 
         self._ensure_publisher()
@@ -317,18 +318,8 @@ class FFmpegController:
                 return
             ffmpeg_logger.info(f"Publisher switched to {output_url!r}")
 
-    def apply_output_change_at_boundary(self, boundary_reason=""):
-        """Apply pending output change at a safe boundary."""
-        with self._lock:
-            if self._pending_rtmp_url is None or self._loop_file or self._current_source_is_live():
-                return False
-            if self._source_proc is not None and self._source_proc.poll() is None:
-                return False
-            self._apply_pending_output()
-            return True
-
     def change_output(self, output_url):
-        """Queue publisher replacement until source reaches a safe boundary."""
+        """Immediately replace publisher and restart source to emit a clean H.264 stream."""
         with self._cutover_lock:
             with self._lock:
                 if output_url == self.rtmp_url:
@@ -338,20 +329,21 @@ class FFmpegController:
                 if source is None or source.poll() is not None:
                     self._apply_pending_output()
                     return
-                ffmpeg_logger.info("Output publisher change pending at source boundary")
 
-    def _switch_output_and_restart(self):
-        position = self._time_pos
-        current_path = self._playlist[self._index]
-        self._kill_source()
-        self._source_proc = None
-        self._apply_pending_output()
-        self._time_pos = position
-        self._start_proc(current_path, seek_seconds=position, loop=self._loop_file)
-        self._cutover_pause_until = 0.0
-        ffmpeg_logger.info("Output publisher changed; source restarted at keyframe")
-
-
+                self._cutover_in_progress = True
+                position = self._time_pos
+                current_path = self._playlist[self._index]
+                loop = self._loop_file
+                self._stop_bridge = True
+                self._kill_source()
+                self._source_proc = None
+                self._apply_pending_output()
+                self._time_pos = position
+                self._start_proc(current_path, seek_seconds=position, loop=loop)
+                self._cutover_in_progress = False
+                self._stop_bridge = False
+                self._cutover_pause_until = 0.0
+                ffmpeg_logger.info("Output publisher changed; source restarted at keyframe")
 
     def output_change_pending(self):
         with self._lock:
@@ -479,6 +471,8 @@ class FFmpegController:
                     continue
                 with self._cutover_lock:
                     with self._lock:
+                        if self._cutover_in_progress:
+                            continue
                         if self._source_proc is not source or self._publisher_proc is not publisher:
                             continue
                         if publisher.poll() is None and publisher.stdin:
@@ -702,7 +696,7 @@ class FFmpegController:
                     with self._lock:
                         if (self._index is not None and self._index + 1 < len(self._playlist)):
                             if self._pending_rtmp_url is not None:
-                                self._switch_output_and_restart()
+                                self._apply_pending_output()
                             self._index += 1
                             self._time_pos = 0.0
                             self._start_proc(self._playlist[self._index])
@@ -711,6 +705,6 @@ class FFmpegController:
                     with self._lock:
                         if self._index is not None and self._playlist:
                             if self._pending_rtmp_url is not None:
-                                self._switch_output_and_restart()
+                                self._apply_pending_output()
                             self._time_pos = 0.0
                             self._start_proc(self._playlist[self._index], loop=True)

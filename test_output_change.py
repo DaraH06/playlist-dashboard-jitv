@@ -23,6 +23,26 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from ffmpeg_controller import FFmpegController
 
+def test_change_output_restarts_source_immediately():
+    ctrl = FFmpegController(rtmp_url="rtmp://old/stream")
+    ctrl._source_proc = MagicMock(poll=lambda: None)
+    ctrl._playlist = ["/path/video.mp4"]
+    ctrl._index = 0
+    ctrl._time_pos = 12.5
+    ctrl._loop_file = False
+
+    with patch.object(ctrl, "_kill_source") as stop_source, \
+            patch.object(ctrl, "_apply_pending_output") as apply_output, \
+            patch.object(ctrl, "_start_proc") as start_source:
+        ctrl.change_output("rtmp://new/stream")
+
+    stop_source.assert_called_once_with()
+    apply_output.assert_called_once_with()
+    start_source.assert_called_once_with("/path/video.mp4", seek_seconds=12.5, loop=False)
+    assert ctrl._cutover_in_progress is False
+    assert ctrl._stop_bridge is False
+
+
 def test_change_output_when_no_source():
     """Pending change should apply immediately when no source is running."""
     with patch('subprocess.Popen'):
@@ -51,7 +71,7 @@ def test_change_output_when_source_idle():
         print("✓ test_change_output_when_source_idle")
 
 def test_change_output_when_file_playing():
-    """File source: change should be pending until boundary."""
+    """File source: change should restart immediately from current position."""
     with patch('subprocess.Popen'):
         ctrl = FFmpegController(rtmp_url="rtmp://old/stream")
         ctrl._publisher_proc = MagicMock(poll=lambda: None)
@@ -63,14 +83,14 @@ def test_change_output_when_file_playing():
         ctrl._loop_file = False
 
         ctrl.change_output("rtmp://new/stream")
-        assert ctrl.rtmp_url == "rtmp://old/stream"
-        assert ctrl._pending_rtmp_url == "rtmp://new/stream"
-        assert ctrl.output_change_pending() is True
+        assert ctrl.rtmp_url == "rtmp://new/stream"
+        assert ctrl._pending_rtmp_url is None
+        assert ctrl.output_change_pending() is False
         assert ctrl.output_change_waiting_for_boundary() is False
         print("✓ test_change_output_when_file_playing")
 
 def test_change_output_when_live_playing():
-    """Live source: change should stay pending until explicit boundary."""
+    """Live source: change should also restart immediately."""
     with patch('subprocess.Popen'):
         ctrl = FFmpegController(rtmp_url="rtmp://old/stream")
         ctrl._publisher_proc = MagicMock(poll=lambda: None)
@@ -82,14 +102,14 @@ def test_change_output_when_live_playing():
         ctrl._loop_file = False
 
         ctrl.change_output("rtmp://new/stream")
-        assert ctrl.rtmp_url == "rtmp://old/stream"
-        assert ctrl._pending_rtmp_url == "rtmp://new/stream"
-        assert ctrl.output_change_pending() is True
-        assert ctrl.output_change_waiting_for_boundary() is True
+        assert ctrl.rtmp_url == "rtmp://new/stream"
+        assert ctrl._pending_rtmp_url is None
+        assert ctrl.output_change_pending() is False
+        assert ctrl.output_change_waiting_for_boundary() is False
         print("✓ test_change_output_when_live_playing")
 
 def test_change_output_when_loop_file():
-    """Loop file: change should wait for loop boundary."""
+    """Loop file: change should restart immediately while preserving loop."""
     with patch('subprocess.Popen'):
         ctrl = FFmpegController(rtmp_url="rtmp://old/stream")
         ctrl._publisher_proc = MagicMock(poll=lambda: None)
@@ -101,9 +121,9 @@ def test_change_output_when_loop_file():
         ctrl._loop_file = True
 
         ctrl.change_output("rtmp://new/stream")
-        assert ctrl.rtmp_url == "rtmp://old/stream"
-        assert ctrl._pending_rtmp_url == "rtmp://new/stream"
-        assert ctrl.output_change_waiting_for_boundary() is True
+        assert ctrl.rtmp_url == "rtmp://new/stream"
+        assert ctrl._pending_rtmp_url is None
+        assert ctrl.output_change_waiting_for_boundary() is False
         print("✓ test_change_output_when_loop_file")
 
 def test_same_url_no_pending():
@@ -144,6 +164,7 @@ def test_pending_at_idle():
         print("✓ test_pending_at_idle")
 
 if __name__ == "__main__":
+    test_change_output_restarts_source_immediately()
     test_change_output_when_no_source()
     test_change_output_when_source_idle()
     test_change_output_when_file_playing()
